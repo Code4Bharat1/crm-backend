@@ -21,6 +21,9 @@ import salesInvoiceRoutes from './routes/salesInvoiceRoutes.js';
 import purchaseOrderRoutes from './routes/purchaseOrderRoutes.js';
 import productRoutes from './routes/productRoutes.js';
 import serialNumberRoutes from './routes/serialNumberRoutes.js';
+import employeeRoutes from './routes/employeeRoutes.js';
+import attendanceRoutes from './routes/attendanceRoutes.js';
+import expenseClaimRoutes from './routes/expenseClaimRoutes.js';
 
 dotenv.config();
 connectDB();
@@ -50,6 +53,9 @@ app.use('/api/sales-orders', salesOrderRoutes);
 app.use('/api/delivery-notes', deliveryNoteRoutes);
 app.use('/api/invoices', salesInvoiceRoutes);
 app.use('/api/purchase-orders', purchaseOrderRoutes);
+app.use('/api/employees', employeeRoutes );
+app.use('/api/attendance', attendanceRoutes);
+app.use('/api/expense-claims', expenseClaimRoutes);
 
 // ─── Health Check ────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
