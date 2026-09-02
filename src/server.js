@@ -8,6 +8,7 @@ import authRoutes from './routes/authRoutes.js';
 import customerRoutes from './routes/customerRoutes.js';
 import salesRoutes from './routes/salesRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
+import whatsappRoutes from './routes/whatsappRoutes.js';
 
 // New business document routes
 import companyRoutes from './routes/companyRoutes.js';
@@ -34,6 +35,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/sales', salesRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/whatsapp', whatsappRoutes);
 
 // ─── Products & Inventory Routes ────────────────────────────────────────────
 app.use('/api/products', productRoutes);

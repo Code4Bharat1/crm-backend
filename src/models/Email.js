@@ -7,7 +7,9 @@ const emailSchema = new mongoose.Schema({
   text: { type: String },
   date: { type: Date },
   mailbox: { type: String },
-  direction: { type: String, default: 'Incoming' }
+  direction: { type: String, default: 'Incoming' },
+  read: { type: Boolean, default: false },
+  followedUp: { type: Boolean, default: false }
 }, { timestamps: true });
 
 export default mongoose.model('Email', emailSchema);

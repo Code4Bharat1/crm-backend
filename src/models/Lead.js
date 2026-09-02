@@ -10,7 +10,8 @@ const leadSchema = new mongoose.Schema({
   value: { type: Number, default: 0 },
   salesperson: { type: String },
   area: { type: String },
-  notes: { type: String }
+  notes: { type: String },
+  sourceEmailId: { type: String, default: null }, // UID of the email this lead was created from
 }, { timestamps: true });
 
 export default mongoose.model('Lead',leadSchema);
