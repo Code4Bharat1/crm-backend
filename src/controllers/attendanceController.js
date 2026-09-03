@@ -1,5 +1,6 @@
 import Attendance from '../models/Attendance.js';
 import Employee from '../models/Employee.js';
+import { createAuditLog } from '../services/auditLogService.js';
 
 export const createAttendance = async (req, res) => {
   try {
@@ -36,6 +37,16 @@ export const createAttendance = async (req, res) => {
     if (status === 'Leave') employee.leaveDays += 1;
     if (overtimeHours) employee.overtimeHours += Number(overtimeHours);
     await employee.save();
+
+    await createAuditLog({
+      req,
+      action: 'CREATE',
+      module: 'ATTENDANCE',
+      resourceType: 'Attendance',
+      resourceId: newAttendance._id,
+      description: `Created attendance for ${employee.fullName} on ${date}`,
+      severity: 'INFO'
+    });
 
     res.status(201).json({ success: true, message: 'Attendance created successfully', data: newAttendance });
   } catch (error) {
@@ -110,6 +121,16 @@ export const updateAttendance = async (req, res) => {
     if (remarks !== undefined) record.remarks = remarks;
     await record.save();
 
+    await createAuditLog({
+      req,
+      action: 'UPDATE',
+      module: 'ATTENDANCE',
+      resourceType: 'Attendance',
+      resourceId: record._id,
+      description: `Updated attendance for employee ${employee ? employee.fullName : record.employeeId}`,
+      severity: 'INFO'
+    });
+
     res.json({ success: true, message: 'Updated successfully', data: record });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -132,6 +153,17 @@ export const deleteAttendance = async (req, res) => {
     }
 
     await Attendance.deleteOne({ _id: req.params.id });
+    
+    await createAuditLog({
+      req,
+      action: 'DELETE',
+      module: 'ATTENDANCE',
+      resourceType: 'Attendance',
+      resourceId: req.params.id,
+      description: `Deleted attendance record`,
+      severity: 'WARNING'
+    });
+    
     res.json({ success: true, message: 'Record deleted' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -199,6 +231,17 @@ export const punchIn = async (req, res) => {
          existing.checkIn = new Date();
          existing.status = 'Present';
          await existing.save();
+
+         await createAuditLog({
+           req,
+           action: 'PUNCH_IN',
+           module: 'ATTENDANCE',
+           resourceType: 'Attendance',
+           resourceId: existing._id,
+           description: `Employee punched in`,
+           severity: 'INFO'
+         });
+
          return res.json({ success: true, message: 'Punch in successful', data: existing });
       }
     }
@@ -216,6 +259,16 @@ export const punchIn = async (req, res) => {
       emp.presentDays += 1;
       await emp.save();
     }
+
+    await createAuditLog({
+      req,
+      action: 'PUNCH_IN',
+      module: 'ATTENDANCE',
+      resourceType: 'Attendance',
+      resourceId: newAttendance._id,
+      description: `Employee punched in`,
+      severity: 'INFO'
+    });
 
     res.status(201).json({ success: true, message: 'Punch in successful', data: newAttendance });
   } catch (error) {
@@ -257,6 +310,16 @@ export const punchOut = async (req, res) => {
     const hours = Math.floor(diffMins / 60);
     const mins = diffMins % 60;
     const workedStr = `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+
+    await createAuditLog({
+      req,
+      action: 'PUNCH_OUT',
+      module: 'ATTENDANCE',
+      resourceType: 'Attendance',
+      resourceId: existing._id,
+      description: `Employee punched out after ${workedStr} hours`,
+      severity: 'INFO'
+    });
 
     res.json({ success: true, message: 'Punch out successful', data: { ...existing.toObject(), workedHours: workedStr } });
   } catch (error) {

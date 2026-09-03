@@ -1,6 +1,7 @@
 import User from '../models/User.js';
 import jwt from 'jsonwebtoken';
 import { getPermissionsForRole } from '../config/permissions.js';
+import { createAuditLog } from '../services/auditLogService.js';
 
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -36,6 +37,18 @@ const loginUser = async (req, res) => {
   const user = await User.findOne({ email });
   if (user && (await user.matchPassword(password))) {
     const permissions = getPermissionsForRole(user.role);
+    
+    // We mock req.user for the audit log since protect middleware hasn't run
+    req.user = user;
+    await createAuditLog({
+      req,
+      action: 'LOGIN',
+      module: 'AUTHENTICATION',
+      description: 'User logged in successfully',
+      severity: 'INFO',
+      status: 'SUCCESS'
+    });
+
     res.json({
       success: true,
       message: 'Login successful',
@@ -51,8 +64,29 @@ const loginUser = async (req, res) => {
       }
     });
   } else {
+    // Audit failed login
+    await createAuditLog({
+      req,
+      action: 'LOGIN_FAILED',
+      module: 'AUTHENTICATION',
+      description: `Failed login attempt for email: ${email}`,
+      severity: 'WARNING',
+      status: 'FAILED'
+    });
     res.status(401).json({ message: 'Invalid email or password' });
   }
 };
 
-export { registerUser, loginUser };
+const logoutUser = async (req, res) => {
+  await createAuditLog({
+    req,
+    action: 'LOGOUT',
+    module: 'AUTHENTICATION',
+    description: 'User logged out successfully',
+    severity: 'INFO',
+    status: 'SUCCESS'
+  });
+  res.json({ success: true, message: 'Logged out successfully' });
+};
+
+export { registerUser, loginUser, logoutUser };

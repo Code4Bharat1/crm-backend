@@ -1,4 +1,5 @@
 import Employee from '../models/Employee.js';
+import { createAuditLog } from '../services/auditLogService.js';
 
 export const createEmployee = async (req, res) => {
   try {
@@ -36,6 +37,16 @@ export const createEmployee = async (req, res) => {
     });
 
     await newEmployee.save();
+
+    await createAuditLog({
+      req,
+      action: 'CREATE',
+      module: 'EMPLOYEE',
+      resourceType: 'Employee',
+      resourceId: newEmployee._id,
+      description: `Created employee ${employeeCode} - ${fullName}`,
+      severity: 'INFO'
+    });
 
     res.status(201).json({
       success: true,
@@ -132,6 +143,16 @@ export const updateEmployee = async (req, res) => {
 
     await employee.save();
 
+    await createAuditLog({
+      req,
+      action: 'UPDATE',
+      module: 'EMPLOYEE',
+      resourceType: 'Employee',
+      resourceId: employee._id,
+      description: `Updated employee ${employee.employeeCode}`,
+      severity: 'INFO'
+    });
+
     res.json({ success: true, message: 'Employee updated successfully', data: employee });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -146,6 +167,17 @@ export const deleteEmployee = async (req, res) => {
     }
     employee.isActive = false;
     await employee.save();
+    
+    await createAuditLog({
+      req,
+      action: 'DELETE',
+      module: 'EMPLOYEE',
+      resourceType: 'Employee',
+      resourceId: employee._id,
+      description: `Deleted employee ${employee.employeeCode}`,
+      severity: 'WARNING'
+    });
+    
     res.json({ success: true, message: 'Employee deleted successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -188,6 +220,15 @@ export const exportEmployees = async (req, res) => {
     res.header('Content-Type', 'text/csv');
     res.attachment('employees.csv');
     res.send(csvStr);
+
+    await createAuditLog({
+      req,
+      action: 'EXPORT',
+      module: 'EMPLOYEE',
+      description: 'Exported employees list',
+      severity: 'INFO'
+    });
+
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
