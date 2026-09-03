@@ -4,6 +4,7 @@ const emailSchema = new mongoose.Schema({
   uid: { type: String, unique: true, required: true },
   subject: { type: String },
   from: { type: String },
+  to: { type: String },
   text: { type: String },
   date: { type: Date },
   mailbox: { type: String },

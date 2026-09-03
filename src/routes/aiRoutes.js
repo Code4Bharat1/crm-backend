@@ -10,6 +10,7 @@ router.post('/extract-lead-from-text', aiController.extractLeadFromText);
 
 // Route to fetch latest email
 router.get('/fetch-email', aiController.fetchEmail);
+router.get('/sync-gmail', aiController.syncGmail);
 
 // Route to get all fetched emails
 router.get('/emails', aiController.getEmails);
@@ -19,5 +20,8 @@ router.put('/emails/:uid/read', aiController.markEmailAsRead);
 
 // Route to send follow-up
 router.post('/emails/:uid/follow-up', aiController.sendFollowUpEmail);
+
+// Route to send email directly from the CRM website
+router.post('/send-email', aiController.sendDirectEmail);
 
 export default router;

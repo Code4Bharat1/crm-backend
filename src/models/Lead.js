@@ -12,6 +12,8 @@ const leadSchema = new mongoose.Schema({
   area: { type: String },
   notes: { type: String },
   sourceEmailId: { type: String, default: null }, // UID of the email this lead was created from
+  customerEmail: { type: String, default: null },
+  lastRepliedAt: { type: Date },
 }, { timestamps: true });
 
 export default mongoose.model('Lead',leadSchema);

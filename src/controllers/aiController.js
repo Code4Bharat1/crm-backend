@@ -6,7 +6,7 @@ import Email from '../models/Email.js';
 import Lead from '../models/Lead.js';
 import { generateWithRetry } from '../utils/geminiRetry.js';
 
-const fetchLatestEmail = async (boxName = 'INBOX') => {
+const fetchRecentEmailsFromBox = async (boxName = 'INBOX', limit = 10) => {
     const config = {
         imap: {
             user: process.env.EMAIL_ID,
@@ -23,59 +23,68 @@ const fetchLatestEmail = async (boxName = 'INBOX') => {
     try {
         const connection = await imaps.connect(config);
         await connection.openBox(boxName);
-        
-        // Search for all emails (just UIDs first to be fast)
+
         const searchCriteria = ['ALL'];
-        const fetchOptions = { bodies: [''] }; // minimal fetch
-        const results = await connection.search(searchCriteria, fetchOptions);
-        
+        const results = await connection.search(searchCriteria, { bodies: [''] });
+
         if (!results || results.length === 0) {
             connection.end();
-            return null;
+            return [];
         }
 
-        // Get the UID of the latest email
-        const lastUid = results[results.length - 1].attributes.uid;
+        const recentResults = results.slice(-limit);
+        const uids = recentResults.map(r => r.attributes.uid);
+        const range = uids[0] + ':' + uids[uids.length - 1];
 
-        // Fetch the full body for this specific latest email
-        const lastEmailResult = await connection.search([['UID', lastUid]], {
+        const messages = await connection.search([['UID', range]], {
             bodies: ['HEADER', 'TEXT', ''],
-            markSeen: true
+            markSeen: false
         });
-        
-        const latestEmail = lastEmailResult[0];
-        const allParts = latestEmail.parts.find(part => part.which === '');
-        const id = latestEmail.attributes.uid;
-        const idHeader = "Imap-Id: "+id+"\r\n";
-        const mail = await simpleParser(idHeader + allParts.body);
+
+        const emailList = [];
+        for (const msg of messages) {
+            const allParts = msg.parts.find(p => p.which === '');
+            const id = msg.attributes.uid;
+            const idHeader = "Imap-Id: " + id + "\r\n";
+            const mail = await simpleParser(idHeader + (allParts?.body || ''));
+
+            const direction = boxName === 'INBOX' ? 'Incoming' : 'Outgoing';
+            const uniqueUid = boxName === 'INBOX' ? id.toString() : `sent-${id.toString()}`;
+
+            const toText = mail.to?.text || (mail.to?.value?.[0]?.address) || '';
+
+            const emailData = {
+                uid: uniqueUid,
+                mailbox: process.env.EMAIL_ID,
+                from: mail.from?.text || 'Unknown',
+                to: toText,
+                subject: mail.subject || 'No Subject',
+                text: mail.text || 'No Body',
+                date: mail.date || new Date(),
+                direction: direction
+            };
+
+            await Email.findOneAndUpdate(
+                { uid: uniqueUid },
+                { $set: emailData },
+                { upsert: true, returnDocument: 'after' }
+            );
+
+            emailList.push(emailData);
+        }
+
         connection.end();
-        
-        const direction = boxName === 'INBOX' ? 'Incoming' : 'Outgoing';
-        const uniqueUid = boxName === 'INBOX' ? lastUid.toString() : `sent-${lastUid.toString()}`;
-
-        const emailData = {
-            uid: uniqueUid,
-            mailbox: process.env.EMAIL_ID,
-            from: mail.from?.text || 'Unknown',
-            subject: mail.subject || 'No Subject',
-            text: mail.text || 'No Body',
-            date: mail.date || new Date(),
-            direction: direction
-        };
-
-        // Save or update in MongoDB to ensure it persists for the Email page
-        await Email.findOneAndUpdate(
-            { uid: uniqueUid },
-            { $set: emailData },
-            { upsert: true, returnDocument: 'after' }
-        );
-        
-        return emailData;
+        return emailList;
 
     } catch (error) {
-        console.error(`Error fetching email from ${boxName}:`, error);
-        return null;
+        console.error(`Error fetching emails from ${boxName}:`, error);
+        return [];
     }
+};
+
+const fetchLatestEmail = async (boxName = 'INBOX') => {
+    const list = await fetchRecentEmailsFromBox(boxName, 1);
+    return list.length > 0 ? list[list.length - 1] : null;
 };
 
 export const extractLead = async (req, res) => {
@@ -181,36 +190,127 @@ Return ONLY valid JSON.
 
 export const fetchEmail = async (req, res) => {
     try {
-        const inboxEmail = await fetchLatestEmail('INBOX');
-        const sentEmail  = await fetchLatestEmail('[Gmail]/Sent Mail');
+        const inboxEmails = await fetchRecentEmailsFromBox('INBOX', 5);
+        const sentEmails  = await fetchRecentEmailsFromBox('[Gmail]/Sent Mail', 10);
 
-        const fetchedEmails = [inboxEmail, sentEmail].filter(Boolean);
+        const fetchedEmails = [...inboxEmails, ...sentEmails];
 
         if (fetchedEmails.length === 0) {
             return res.status(404).json({ message: "No new emails found." });
         }
 
-        // --- Auto-progress leads for incoming emails ---
-        // If the sender already has a "Contacted" lead, advance it to "Potential"
         const progressions = [];
-        for (const email of fetchedEmails) {
-            if (email.direction !== 'Incoming') continue;
 
-            // Extract sender email address
+        // --- 1. Process OUTGOING emails (replies sent from Gmail) ---
+        // Advance leads from "New" to "Contacted"
+        for (const email of sentEmails) {
+            const toMatch = (email.to || '').match(/<([^>]+)>/);
+            const recipient = (toMatch ? toMatch[1] : email.to || '').trim().toLowerCase();
+            const recipientName = (email.to || '').split('<')[0].replace(/["']/g, '').trim();
+
+            if (!recipient || recipient === (process.env.EMAIL_ID || '').toLowerCase()) continue;
+
+            const cleanSubject = (email.subject || '').replace(/^(Re:\s*|Fwd:\s*|re:\s*|fwd:\s*)+/i, '').trim();
+
+            // Find matching incoming email by sender or clean subject
+            const matchedIncoming = await Email.findOne({
+                direction: 'Incoming',
+                $or: [
+                    { from: { $regex: new RegExp(recipient.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') } },
+                    ...(cleanSubject ? [{ subject: { $regex: new RegExp(`^${cleanSubject.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }] : [])
+                ]
+            });
+
+            // Find existing lead
+            let existingLead = null;
+            if (matchedIncoming) {
+                existingLead = await Lead.findOne({ sourceEmailId: matchedIncoming.uid });
+            }
+            if (!existingLead) {
+                existingLead = await Lead.findOne({
+                    $or: [
+                        { customerEmail: { $regex: new RegExp(`^${recipient}$`, 'i') } },
+                        { notes: { $regex: new RegExp(recipient.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') } },
+                        ...(recipientName ? [{ customerName: { $regex: new RegExp(`^${recipientName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }] : [])
+                    ]
+                }).sort({ updatedAt: -1 });
+            }
+
+            if (existingLead) {
+                if (existingLead.stage === 'New') {
+                    const prevStage = existingLead.stage;
+                    existingLead.stage = 'Contacted';
+                    existingLead.customerEmail = existingLead.customerEmail || recipient;
+                    existingLead.lastRepliedAt = email.date || new Date();
+                    existingLead.notes = (existingLead.notes || '') +
+                        `\n\n[Replied via Gmail] Reply sent to ${recipient} on ${new Date(email.date || Date.now()).toLocaleString()}.\nSubject: "${email.subject}"`;
+                    await existingLead.save();
+
+                    progressions.push({
+                        id: existingLead.id,
+                        customerName: existingLead.customerName,
+                        prevStage,
+                        nextStage: 'Contacted',
+                        type: 'outgoing_reply',
+                        replyDate: email.date
+                    });
+                    console.log(`[Lead Auto-Progress] ${existingLead.customerName} (${existingLead.id}): New → Contacted (Gmail Reply)`);
+                } else if (!existingLead.notes?.includes(email.subject)) {
+                    existingLead.lastRepliedAt = email.date || new Date();
+                    existingLead.notes = (existingLead.notes || '') +
+                        `\n\n[Replied via Gmail] Additional reply sent to ${recipient} on ${new Date(email.date || Date.now()).toLocaleString()}.\nSubject: "${email.subject}"`;
+                    await existingLead.save();
+                }
+            } else if (matchedIncoming) {
+                // Customer sent inquiry, we replied in Gmail before lead was generated: create directly at Contacted stage!
+                const newLead = new Lead({
+                    id: `LD-${Math.floor(Math.random() * 9000) + 1000}`,
+                    customerName: recipientName || matchedIncoming.from.split('<')[0].replace(/["']/g, '').trim() || 'Unknown Customer',
+                    source: 'Email Inquiry',
+                    stage: 'Contacted',
+                    priority: 'Medium',
+                    value: 0,
+                    salesperson: 'System AI',
+                    area: 'Online',
+                    notes: `Requirement: Inquiry via Email (${matchedIncoming.subject})\n\n[Replied via Gmail] Reply sent to ${recipient} on ${new Date(email.date || Date.now()).toLocaleString()}.\nSubject: "${email.subject}"`,
+                    sourceEmailId: matchedIncoming.uid,
+                    customerEmail: recipient,
+                    lastRepliedAt: email.date || new Date()
+                });
+                await newLead.save();
+                progressions.push({
+                    id: newLead.id,
+                    customerName: newLead.customerName,
+                    prevStage: 'New',
+                    nextStage: 'Contacted',
+                    type: 'outgoing_reply',
+                    replyDate: email.date
+                });
+                console.log(`[Lead Auto-Created] ${newLead.customerName} (${newLead.id}): Created at Contacted (Gmail Reply)`);
+            }
+        }
+
+        // --- 2. Process INCOMING emails: Advance leads from Contacted -> Potential ---
+        for (const email of inboxEmails) {
             const contactMatch = (email.from || '').match(/<([^>]+)>/);
-            const contact      = contactMatch ? contactMatch[1] : email.from;
-            const customerName = (email.from || '').split('<')[0].trim() || email.from;
+            const contact      = (contactMatch ? contactMatch[1] : email.from || '').trim().toLowerCase();
+            const customerName = (email.from || '').split('<')[0].replace(/["']/g, '').trim() || email.from;
 
-            // Find a Contacted lead matching this sender
             const existingLead = await Lead.findOne({
                 stage: 'Contacted',
                 $or: [
+                    { customerEmail: { $regex: new RegExp(`^${contact}$`, 'i') } },
                     { notes: { $regex: new RegExp(contact.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') } },
-                    { customerName: { $regex: new RegExp(`^${customerName.trim()}$`, 'i') } }
+                    { customerName: { $regex: new RegExp(`^${customerName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }
                 ]
             }).sort({ updatedAt: -1 });
 
             if (existingLead) {
+                // Only advance to Potential if the incoming email was received AFTER our reply was sent!
+                if (existingLead.lastRepliedAt && new Date(email.date) <= new Date(existingLead.lastRepliedAt)) {
+                    continue;
+                }
+
                 existingLead.stage = 'Potential';
                 existingLead.notes = (existingLead.notes || '') +
                     `\n\n[Auto-Progressed] Customer sent a new message.` +
@@ -218,9 +318,11 @@ export const fetchEmail = async (req, res) => {
                     `\nStage advanced: Contacted → Potential on ${new Date().toLocaleString()}.`;
                 await existingLead.save();
                 progressions.push({
-                    customerName,
+                    id: existingLead.id,
+                    customerName: existingLead.customerName,
                     prevStage: 'Contacted',
-                    nextStage: 'Potential'
+                    nextStage: 'Potential',
+                    type: 'incoming_reply'
                 });
                 console.log(`[Lead Auto-Progress] ${customerName}: Contacted → Potential`);
             }
@@ -232,6 +334,8 @@ export const fetchEmail = async (req, res) => {
         res.status(500).json({ message: "Internal server error while fetching email", error: error.message });
     }
 };
+
+export const syncGmail = fetchEmail;
 
 
 export const getEmails = async (req, res) => {
@@ -323,3 +427,93 @@ export const sendFollowUpEmail = async (req, res) => {
         res.status(500).json({ message: "Error sending follow-up email", error: error.message });
     }
 };
+
+export const sendDirectEmail = async (req, res) => {
+    try {
+        const { to, subject, message, leadId } = req.body;
+
+        if (!to || !subject || !message) {
+            return res.status(400).json({ message: "Recipient (to), subject, and message are required." });
+        }
+
+        const transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: process.env.EMAIL_ID,
+                pass: process.env.EMAIL_PASSWORD
+            }
+        });
+
+        const mailOptions = {
+            from: process.env.EMAIL_ID,
+            to: to.trim(),
+            subject: subject.trim(),
+            text: message,
+            html: `<div>${message.replace(/\n/g, '<br/>')}</div><br/><br/><em>Sent from Sales Team</em>`
+        };
+
+        await transporter.sendMail(mailOptions);
+        const sentDate = new Date();
+        const sentUid = `sent-web-${Date.now()}`;
+
+        // Save email record in MongoDB
+        const emailRecord = new Email({
+            uid: sentUid,
+            mailbox: process.env.EMAIL_ID,
+            from: process.env.EMAIL_ID,
+            to: to.trim(),
+            subject: subject.trim(),
+            text: message,
+            date: sentDate,
+            direction: 'Outgoing',
+            read: true,
+            followedUp: true
+        });
+        await emailRecord.save();
+
+        // Update matching lead
+        let updatedLead = null;
+        if (leadId) {
+            updatedLead = await Lead.findOne({ id: leadId });
+        }
+        if (!updatedLead) {
+            updatedLead = await Lead.findOne({
+                $or: [
+                    { customerEmail: { $regex: new RegExp(`^${to.trim()}$`, 'i') } },
+                    { notes: { $regex: new RegExp(to.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') } }
+                ]
+            });
+        }
+
+        if (updatedLead) {
+            const prevStage = updatedLead.stage;
+            if (updatedLead.stage === 'New') {
+                updatedLead.stage = 'Contacted';
+            }
+            updatedLead.customerEmail = updatedLead.customerEmail || to.trim();
+            updatedLead.lastRepliedAt = sentDate;
+            updatedLead.notes = (updatedLead.notes || '') +
+                `\n\n[Sent from CRM] Outgoing email sent to ${to.trim()} on ${sentDate.toLocaleString()}.\nSubject: "${subject.trim()}"\nMessage:\n${message}`;
+            await updatedLead.save();
+
+            return res.json({
+                success: true,
+                message: `Email sent to ${to} successfully!`,
+                lead: updatedLead,
+                prevStage,
+                stage: updatedLead.stage
+            });
+        }
+
+        return res.json({
+            success: true,
+            message: `Email sent to ${to} successfully!`,
+            email: emailRecord
+        });
+
+    } catch (error) {
+        console.error("Error sending direct email:", error);
+        res.status(500).json({ message: "Failed to send email", error: error.message });
+    }
+};
+
