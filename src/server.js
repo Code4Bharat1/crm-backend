@@ -34,6 +34,7 @@ import expenseClaimRoutes from './routes/expenseClaimRoutes.js';
 import projectRoutes from './routes/projectRoutes.js';
 import serviceRequestRoutes from './routes/serviceRequestRoutes.js';
 import warrantyRoutes from './routes/warrantyRoutes.js';
+import roleRoutes from './routes/roleRoutes.js';
 
 dotenv.config();
 connectDB();
@@ -73,6 +74,7 @@ app.use('/api/expense-claims', expenseClaimRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/service-requests', serviceRequestRoutes);
 app.use('/api/warranties', warrantyRoutes);
+app.use('/api/roles', roleRoutes);
 
 // ─── Health Check ────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));

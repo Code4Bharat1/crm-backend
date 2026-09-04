@@ -55,4 +55,32 @@ const loginUser = async (req, res) => {
   }
 };
 
-export { registerUser, loginUser };
+const changePassword = async (req, res) => {
+  try {
+    const { email, currentPassword, newPassword } = req.body;
+    if (!email || !newPassword) {
+      return res.status(400).json({ success: false, message: 'Email and new password are required' });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (currentPassword && !(await user.matchPassword(currentPassword))) {
+      return res.status(401).json({ success: false, message: 'Current password does not match' });
+    }
+
+    user.password = newPassword;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Password changed successfully. You can now log in with your new password.',
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export { registerUser, loginUser, changePassword };

@@ -1,11 +1,16 @@
 import Employee from '../models/Employee.js';
+import Role from '../models/Role.js';
+import User from '../models/User.js';
+import { sendWelcomeEmail } from '../utils/sendWelcomeEmail.js';
+import { sendEmployeeUpdateEmail } from '../utils/sendEmployeeUpdateEmail.js';
+import { findMatchingRoleInList } from '../utils/roleMatcher.js';
 
 export const createEmployee = async (req, res) => {
   try {
     const { firstName, lastName, role, department, phone, email, employmentType, joiningDate, status } = req.body;
 
-    if (!firstName || !lastName || !role || !department || !phone || !email) {
-      return res.status(400).json({ success: false, message: 'Missing required fields' });
+    if (!firstName || !lastName || !role || !phone || !email) {
+      return res.status(400).json({ success: false, message: 'Missing required fields (First name, Last name, Role, Phone, Email)' });
     }
 
     const existingEmail = await Employee.findOne({ email });
@@ -13,17 +18,41 @@ export const createEmployee = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Email already exists' });
     }
 
-    const count = await Employee.countDocuments();
-    const employeeCode = `EMP${(count + 1).toString().padStart(3, '0')}`;
+    let nextNum = (await Employee.countDocuments()) + 1;
+    let employeeCode;
+    do {
+      employeeCode = `EMP${nextNum.toString().padStart(3, '0')}`;
+      const exists = await Employee.findOne({ employeeCode });
+      if (!exists) break;
+      nextNum++;
+    } while (true);
+
     const fullName = `${firstName} ${lastName}`;
+
+    // Smart role normalization: e.g. "Sale" or "sales" -> "Sales"
+    let normalizedRole = role.trim();
+    try {
+      const allDbRoles = await Role.find();
+      const distinctEmpRoles = await Employee.distinct('role');
+      const candidateRoles = [
+        ...allDbRoles.map((r) => r.name),
+        ...distinctEmpRoles,
+      ].filter(Boolean);
+      const matched = findMatchingRoleInList(normalizedRole, candidateRoles);
+      if (matched) {
+        normalizedRole = typeof matched === 'string' ? matched : matched.name;
+      }
+    } catch (err) {
+      console.warn('Role normalization fallback:', err.message);
+    }
 
     const newEmployee = new Employee({
       employeeCode,
       firstName,
       lastName,
       fullName,
-      role,
-      department,
+      role: normalizedRole,
+      department: department && department.trim() ? department.trim() : (normalizedRole || 'General'),
       phone,
       email,
       employmentType: employmentType || 'Full Time',
@@ -37,10 +66,37 @@ export const createEmployee = async (req, res) => {
 
     await newEmployee.save();
 
+    // Default password for newly onboarded employee
+    const defaultPassword = process.env.DEFAULT_EMPLOYEE_PASSWORD || '123456';
+
+    // Create or sync user login credentials
+    try {
+      let user = await User.findOne({ email: newEmployee.email });
+      if (!user) {
+        user = new User({
+          name: newEmployee.fullName,
+          email: newEmployee.email,
+          password: defaultPassword,
+          role: newEmployee.role,
+          employeeId: newEmployee._id,
+        });
+        await user.save();
+      }
+    } catch (userErr) {
+      console.warn('User account sync notice:', userErr.message);
+    }
+
+    // Send welcome email with credentials and change password instructions
+    const emailResult = await sendWelcomeEmail(newEmployee, defaultPassword);
+
     res.status(201).json({
       success: true,
-      message: 'Employee created successfully',
-      data: newEmployee
+      message: emailResult.success
+        ? `Employee created successfully and welcome email with default password sent to ${newEmployee.email}`
+        : `Employee created successfully (Email notification failed: ${emailResult.error})`,
+      data: newEmployee,
+      emailSent: emailResult.success,
+      defaultPassword,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -116,7 +172,19 @@ export const updateEmployee = async (req, res) => {
     if (firstName || lastName) {
       employee.fullName = `${employee.firstName} ${employee.lastName}`;
     }
-    if (role) employee.role = role;
+    if (role) {
+      let normalizedRole = role.trim();
+      try {
+        const allDbRoles = await Role.find();
+        const matched = findMatchingRoleInList(normalizedRole, allDbRoles);
+        if (matched) {
+          normalizedRole = typeof matched === 'string' ? matched : matched.name;
+        }
+      } catch (e) {
+        console.warn('Role normalization fallback in update:', e.message);
+      }
+      employee.role = normalizedRole;
+    }
     if (department) employee.department = department;
     if (phone) employee.phone = phone;
     if (email && email !== employee.email) {
@@ -132,7 +200,33 @@ export const updateEmployee = async (req, res) => {
 
     await employee.save();
 
-    res.json({ success: true, message: 'Employee updated successfully', data: employee });
+    // Sync corresponding User account if exists
+    try {
+      const user = await User.findOne({ $or: [{ employeeId: employee._id }, { email: employee.email }] });
+      if (user) {
+        if (employee.fullName) user.name = employee.fullName;
+        if (employee.email) user.email = employee.email;
+        if (employee.role) user.role = employee.role;
+        await user.save();
+      }
+    } catch (uErr) {
+      console.warn('User account sync note on update:', uErr.message);
+    }
+
+    // Dispatch update notification email to employee
+    console.log(`📧 Dispatching update notification email to: ${employee.email}`);
+    const emailResult = await sendEmployeeUpdateEmail(employee);
+    console.log(`📧 Email dispatch result for ${employee.email}:`, emailResult);
+
+    res.json({
+      success: true,
+      message: emailResult.success
+        ? `Employee updated successfully and notification email sent to ${employee.email}`
+        : `Employee updated successfully, but email dispatch note: ${emailResult.error || 'Failed to send'}`,
+      data: employee,
+      emailSent: Boolean(emailResult.success),
+      emailRecipient: employee.email,
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
