@@ -77,7 +77,6 @@ const loginUser = async (req, res) => {
   }
 };
 
-<<<<<<< HEAD
 const changePassword = async (req, res) => {
   try {
     const { email, currentPassword, newPassword } = req.body;
@@ -106,8 +105,6 @@ const changePassword = async (req, res) => {
   }
 };
 
-export { registerUser, loginUser, changePassword };
-=======
 const logoutUser = async (req, res) => {
   await createAuditLog({
     req,
@@ -120,5 +117,6 @@ const logoutUser = async (req, res) => {
   res.json({ success: true, message: 'Logged out successfully' });
 };
 
-export { registerUser, loginUser, logoutUser };
->>>>>>> b6de593d8d680589e143ab06edd884b3bebc6a99
+export { registerUser, loginUser, logoutUser, changePassword };
+
+

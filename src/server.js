@@ -83,3 +83,13 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+
+// Prevent server crash from unhandled external socket drops or promise rejections
+process.on('unhandledRejection', (reason) => {
+  console.error('⚠️ [Process] Unhandled Promise Rejection:', reason?.message || reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('⚠️ [Process] Uncaught Exception:', err?.message || err);
+});
+

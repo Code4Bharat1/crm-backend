@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Employee from '../models/Employee.js';
 import { createAuditLog } from '../services/auditLogService.js';
 import Role from '../models/Role.js';
@@ -69,27 +70,6 @@ export const createEmployee = async (req, res) => {
 
     // Default password for newly onboarded employee
     const defaultPassword = process.env.DEFAULT_EMPLOYEE_PASSWORD || '123456';
-
-     await createAuditLog({
-      req,
-      action: 'UPDATE',
-      module: 'EMPLOYEE',
-      resourceType: 'Employee',
-      resourceId: employee._id,
-      description: `Updated employee ${employee.employeeCode}`,
-      severity: 'INFO'
-    });
-
-    await createAuditLog({
-      req,
-      action: 'UPDATE',
-      module: 'EMPLOYEE',
-      resourceType: 'Employee',
-      resourceId: employee._id,
-      description: `Updated employee ${employee.employeeCode}`,
-      severity: 'INFO'
-    });
-
 
     // Create or sync user login credentials
     try {
@@ -232,6 +212,16 @@ export const updateEmployee = async (req, res) => {
 
     await employee.save();
 
+    await createAuditLog({
+      req,
+      action: 'UPDATE',
+      module: 'EMPLOYEE',
+      resourceType: 'Employee',
+      resourceId: employee._id,
+      description: `Updated employee ${employee.employeeCode} - ${employee.fullName}`,
+      severity: 'INFO'
+    });
+
    
     // Sync corresponding User account if exists
     try {
@@ -267,24 +257,50 @@ export const updateEmployee = async (req, res) => {
 
 export const deleteEmployee = async (req, res) => {
   try {
-    const employee = await Employee.findOne({ _id: req.params.id, isActive: true });
+    const { id } = req.params;
+    let employee = null;
+
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      employee = await Employee.findById(id);
+    }
+    if (!employee) {
+      employee = await Employee.findOne({ employeeCode: id });
+    }
+
     if (!employee) {
       return res.status(404).json({ success: false, message: 'Employee not found' });
     }
-    employee.isActive = false;
-    await employee.save();
-    
+
+    const employeeName = employee.fullName || `${employee.firstName} ${employee.lastName}`;
+    const employeeCode = employee.employeeCode;
+    const employeeEmail = employee.email;
+
+    // Delete employee record
+    await Employee.findByIdAndDelete(employee._id);
+
+    // Also remove associated User authentication account if one exists
+    try {
+      await User.findOneAndDelete({
+        $or: [
+          { employeeId: employee._id },
+          { email: employeeEmail }
+        ]
+      });
+    } catch (uErr) {
+      console.warn('User account sync note on employee deletion:', uErr.message);
+    }
+
     await createAuditLog({
       req,
       action: 'DELETE',
       module: 'EMPLOYEE',
       resourceType: 'Employee',
       resourceId: employee._id,
-      description: `Deleted employee ${employee.employeeCode}`,
+      description: `Deleted employee ${employeeName} (${employeeCode})`,
       severity: 'WARNING'
     });
-    
-    res.json({ success: true, message: 'Employee deleted successfully' });
+
+    res.json({ success: true, message: `Employee ${employeeName} (${employeeCode}) deleted successfully` });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

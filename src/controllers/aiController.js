@@ -7,6 +7,11 @@ import Lead from '../models/Lead.js';
 import { generateWithRetry } from '../utils/geminiRetry.js';
 
 const fetchRecentEmailsFromBox = async (boxName = 'INBOX', limit = 10) => {
+    if (!process.env.EMAIL_ID || !process.env.EMAIL_PASSWORD) {
+        console.warn(`[IMAP] Skipping ${boxName}: EMAIL_ID or EMAIL_PASSWORD not configured.`);
+        return [];
+    }
+
     const config = {
         imap: {
             user: process.env.EMAIL_ID,
@@ -15,20 +20,27 @@ const fetchRecentEmailsFromBox = async (boxName = 'INBOX', limit = 10) => {
             port: 993,
             tls: true,
             tlsOptions: { rejectUnauthorized: false },
-            authTimeout: 30000,
-            connTimeout: 30000
+            authTimeout: 20000,
+            connTimeout: 20000
         }
     };
 
+    let connection = null;
+
     try {
-        const connection = await imaps.connect(config);
+        connection = await imaps.connect(config);
+
+        // Crucial: Attach error listener to prevent unhandled 'error' events on socket ECONNRESET from crashing the Node process
+        connection.on('error', (err) => {
+            console.error(`[IMAP Socket Error] ${boxName}:`, err?.message || err);
+        });
+
         await connection.openBox(boxName);
 
         const searchCriteria = ['ALL'];
         const results = await connection.search(searchCriteria, { bodies: [''] });
 
         if (!results || results.length === 0) {
-            connection.end();
             return [];
         }
 
@@ -43,42 +55,53 @@ const fetchRecentEmailsFromBox = async (boxName = 'INBOX', limit = 10) => {
 
         const emailList = [];
         for (const msg of messages) {
-            const allParts = msg.parts.find(p => p.which === '');
-            const id = msg.attributes.uid;
-            const idHeader = "Imap-Id: " + id + "\r\n";
-            const mail = await simpleParser(idHeader + (allParts?.body || ''));
+            try {
+                const allParts = msg.parts.find(p => p.which === '');
+                const id = msg.attributes.uid;
+                const idHeader = "Imap-Id: " + id + "\r\n";
+                const mail = await simpleParser(idHeader + (allParts?.body || ''));
 
-            const direction = boxName === 'INBOX' ? 'Incoming' : 'Outgoing';
-            const uniqueUid = boxName === 'INBOX' ? id.toString() : `sent-${id.toString()}`;
+                const direction = boxName === 'INBOX' ? 'Incoming' : 'Outgoing';
+                const uniqueUid = boxName === 'INBOX' ? id.toString() : `sent-${id.toString()}`;
 
-            const toText = mail.to?.text || (mail.to?.value?.[0]?.address) || '';
+                const toText = mail.to?.text || (mail.to?.value?.[0]?.address) || '';
 
-            const emailData = {
-                uid: uniqueUid,
-                mailbox: process.env.EMAIL_ID,
-                from: mail.from?.text || 'Unknown',
-                to: toText,
-                subject: mail.subject || 'No Subject',
-                text: mail.text || 'No Body',
-                date: mail.date || new Date(),
-                direction: direction
-            };
+                const emailData = {
+                    uid: uniqueUid,
+                    mailbox: process.env.EMAIL_ID,
+                    from: mail.from?.text || 'Unknown',
+                    to: toText,
+                    subject: mail.subject || 'No Subject',
+                    text: mail.text || 'No Body',
+                    date: mail.date || new Date(),
+                    direction: direction
+                };
 
-            await Email.findOneAndUpdate(
-                { uid: uniqueUid },
-                { $set: emailData },
-                { upsert: true, returnDocument: 'after' }
-            );
+                await Email.findOneAndUpdate(
+                    { uid: uniqueUid },
+                    { $set: emailData },
+                    { upsert: true, returnDocument: 'after' }
+                );
 
-            emailList.push(emailData);
+                emailList.push(emailData);
+            } catch (itemErr) {
+                console.error(`[IMAP] Error processing message UID ${msg?.attributes?.uid} in ${boxName}:`, itemErr.message || itemErr);
+            }
         }
 
-        connection.end();
         return emailList;
 
     } catch (error) {
-        console.error(`Error fetching emails from ${boxName}:`, error);
+        console.error(`Error fetching emails from ${boxName}:`, error.message || error);
         return [];
+    } finally {
+        if (connection) {
+            try {
+                connection.end();
+            } catch (closeErr) {
+                // Suppress socket close errors
+            }
+        }
     }
 };
 
@@ -364,6 +387,10 @@ export const markEmailAsRead = async (req, res) => {
         console.error("Error updating DB read status:", err);
     }
 
+    if (!process.env.EMAIL_ID || !process.env.EMAIL_PASSWORD) {
+        return res.json({ message: "Email marked as read locally (IMAP not configured)" });
+    }
+
     const config = {
         imap: {
             user: process.env.EMAIL_ID,
@@ -372,22 +399,30 @@ export const markEmailAsRead = async (req, res) => {
             port: 993,
             tls: true,
             tlsOptions: { rejectUnauthorized: false },
-            authTimeout: 30000,
-            connTimeout: 30000
+            authTimeout: 20000,
+            connTimeout: 20000
         }
     };
 
+    let connection = null;
     try {
-        const connection = await imaps.connect(config);
+        connection = await imaps.connect(config);
+        connection.on('error', (err) => {
+            console.error("IMAP connection error in markEmailAsRead:", err?.message || err);
+        });
         await connection.openBox('INBOX');
-        
         await connection.addFlags(uid, ['\\Seen']);
-        connection.end();
 
         res.json({ message: "Email marked as read in Gmail" });
     } catch (error) {
-        console.error("Error marking email as read in Gmail:", error);
+        console.error("Error marking email as read in Gmail:", error.message || error);
         res.status(500).json({ message: "Error marking email as read in Gmail", error: error.message });
+    } finally {
+        if (connection) {
+            try {
+                connection.end();
+            } catch (closeErr) {}
+        }
     }
 };
 

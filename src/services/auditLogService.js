@@ -31,16 +31,16 @@ export const createAuditLog = async ({
     // Extract IP address correctly, prioritizing x-forwarded-for if behind a proxy
     let ipAddress = 'unknown';
     if (req) {
-      ipAddress = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+      ipAddress = req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || 'unknown';
       // Handle IPv4 mapped IPv6 addresses (e.g., ::ffff:127.0.0.1)
-      if (ipAddress && ipAddress.includes('::ffff:')) {
+      if (typeof ipAddress === 'string' && ipAddress.includes('::ffff:')) {
         ipAddress = ipAddress.split('::ffff:')[1];
       }
     }
 
     // Extract User Agent
     let userAgent = 'unknown';
-    if (req && req.headers['user-agent']) {
+    if (req?.headers?.['user-agent']) {
       userAgent = req.headers['user-agent'];
     }
 
