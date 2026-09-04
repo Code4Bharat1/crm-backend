@@ -6,6 +6,8 @@ import {
   updateProject,
   deleteProject,
   addProjectCost,
+  updateProjectCost,
+  deleteProjectCost,
   getProfitabilitySummary
 } from '../controllers/projectController.js';
 
@@ -23,5 +25,8 @@ router.route('/:id')
   .delete(deleteProject);
 
 router.post('/:id/costs', addProjectCost);
+router.route('/:id/costs/:costId')
+  .put(updateProjectCost)
+  .delete(deleteProjectCost);
 
 export default router;

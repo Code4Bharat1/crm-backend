@@ -1,4 +1,7 @@
 import Project from '../models/Project.js';
+import Notification from '../models/Notification.js';
+import Employee from '../models/Employee.js';
+import { sendProjectAssignmentEmail } from '../utils/sendProjectAssignmentEmail.js';
 
 // Helper to calculate actual cost of a project
 export const calculateProjectActualCost = (project) => {
@@ -185,6 +188,45 @@ export const createProject = async (req, res) => {
 
     await project.save();
 
+    // Trigger Notification for the assigned Project Manager
+    if (project.manager && project.manager !== 'Unassigned') {
+      try {
+        const emp = await Employee.findOne({
+          $or: [
+            { fullName: { $regex: `^${project.manager.trim()}$`, $options: 'i' } },
+            { firstName: { $regex: `^${project.manager.trim()}$`, $options: 'i' } }
+          ]
+        });
+
+        const formattedRev = Number(project.revenue || 0).toLocaleString('en-IN');
+        await Notification.create({
+          recipient: project.manager,
+          recipientEmail: emp?.email || '',
+          recipientRole: emp?.role || 'project manager',
+          title: `Project Assigned: ${project.name}`,
+          detail: `You have been assigned as Project Manager for "${project.name}" (Client: ${project.customer?.name || 'Customer'}, Value: ₹${formattedRev}, Code: ${project.projectId}).`,
+          type: 'Project',
+          severity: 'info',
+          link: `/projects/${project.projectId || project._id}`,
+          projectId: project.projectId,
+          projectName: project.name,
+          customerName: project.customer?.name || '',
+          revenue: project.revenue || 0,
+          read: false,
+          at: new Date()
+        });
+        console.log(`🔔 [Notification] Project assignment notification generated for PM: ${project.manager}`);
+
+        if (emp?.email) {
+          sendProjectAssignmentEmail(project, emp).catch((err) => {
+            console.warn('[Notification] Background assignment email failed:', err.message);
+          });
+        }
+      } catch (notifErr) {
+        console.error('⚠️ [Notification] Failed to create project assignment notification:', notifErr);
+      }
+    }
+
     res.status(201).json({
       success: true,
       message: 'Project created successfully',
@@ -208,8 +250,45 @@ export const updateProject = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Project not found' });
     }
 
+    const prevManager = project.manager;
     Object.assign(project, req.body);
     await project.save();
+
+    // Trigger notification if project manager is newly assigned or changed
+    if (req.body.manager && req.body.manager !== prevManager && req.body.manager !== 'Unassigned') {
+      try {
+        const emp = await Employee.findOne({
+          $or: [
+            { fullName: { $regex: `^${req.body.manager.trim()}$`, $options: 'i' } },
+            { firstName: { $regex: `^${req.body.manager.trim()}$`, $options: 'i' } }
+          ]
+        });
+
+        const formattedRev = Number(project.revenue || 0).toLocaleString('en-IN');
+        await Notification.create({
+          recipient: req.body.manager,
+          recipientEmail: emp?.email || '',
+          recipientRole: emp?.role || 'project manager',
+          title: `Project Assigned: ${project.name}`,
+          detail: `You have been assigned as Project Manager for "${project.name}" (Client: ${project.customer?.name || 'Customer'}, Value: ₹${formattedRev}, Code: ${project.projectId}).`,
+          type: 'Project',
+          severity: 'info',
+          link: `/projects/${project.projectId || project._id}`,
+          projectId: project.projectId,
+          projectName: project.name,
+          customerName: project.customer?.name || '',
+          revenue: project.revenue || 0,
+          read: false,
+          at: new Date()
+        });
+
+        if (emp?.email) {
+          sendProjectAssignmentEmail(project, emp).catch(() => {});
+        }
+      } catch (notifErr) {
+        console.error('⚠️ [Notification] Failed to create project reassignment notification:', notifErr);
+      }
+    }
 
     res.json({
       success: true,
@@ -279,6 +358,75 @@ export const addProjectCost = async (req, res) => {
   }
 };
 
+// PUT /api/projects/:id/costs/:costId — Update a cost line
+export const updateProjectCost = async (req, res) => {
+  try {
+    const { id, costId } = req.params;
+    const { head, category, amount, reference, notes, date } = req.body;
+
+    const project = await Project.findOne({
+      $or: [{ _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null }, { projectId: id }]
+    });
+
+    if (!project) {
+      return res.status(404).json({ success: false, message: 'Project not found' });
+    }
+
+    const costItem = (project.costs && project.costs.id)
+      ? project.costs.id(costId)
+      : project.costs.find((c) => c._id && c._id.toString() === costId);
+
+    if (!costItem) {
+      return res.status(404).json({ success: false, message: 'Cost entry not found' });
+    }
+
+    if (head !== undefined) costItem.head = head;
+    if (category !== undefined) costItem.category = category;
+    if (amount !== undefined) costItem.amount = Number(amount) || 0;
+    if (reference !== undefined) costItem.reference = reference;
+    if (notes !== undefined) costItem.notes = notes;
+    if (date !== undefined) costItem.date = date;
+
+    await project.save();
+
+    res.json({
+      success: true,
+      message: 'Cost entry updated successfully',
+      project,
+      costItem
+    });
+  } catch (error) {
+    console.error('Error updating project cost:', error);
+    res.status(400).json({ success: false, message: 'Failed to update cost entry', error: error.message });
+  }
+};
+
+// DELETE /api/projects/:id/costs/:costId — Delete a cost line
+export const deleteProjectCost = async (req, res) => {
+  try {
+    const { id, costId } = req.params;
+    const project = await Project.findOne({
+      $or: [{ _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null }, { projectId: id }]
+    });
+
+    if (!project) {
+      return res.status(404).json({ success: false, message: 'Project not found' });
+    }
+
+    project.costs = project.costs.filter((c) => c._id && c._id.toString() !== costId);
+    await project.save();
+
+    res.json({
+      success: true,
+      message: 'Cost entry deleted successfully',
+      project
+    });
+  } catch (error) {
+    console.error('Error deleting project cost:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete cost entry', error: error.message });
+  }
+};
+
 // GET /api/projects/profitability-summary — Deep profitability analytics across all projects
 export const getProfitabilitySummary = async (req, res) => {
   try {
@@ -340,6 +488,25 @@ export const getProfitabilitySummary = async (req, res) => {
     const healthyMarginCount = projectBreakdown.filter(p => p.margin >= 15 && p.margin < 25).length;
     const lowMarginCount = projectBreakdown.filter(p => p.margin >= 0 && p.margin < 15).length;
 
+    const allCosts = [];
+    projects.forEach((p) => {
+      (p.costs || []).forEach((c) => {
+        allCosts.push({
+          _id: c._id,
+          projectId: p.projectId || p._id,
+          projectName: p.name,
+          customerName: p.customer?.name || '—',
+          head: c.head,
+          category: c.category || 'Other',
+          amount: Number(c.amount) || 0,
+          reference: c.reference || '',
+          notes: c.notes || '',
+          date: c.date || p.createdAt
+        });
+      });
+    });
+    allCosts.sort((a, b) => new Date(b.date) - new Date(a.date));
+
     res.json({
       success: true,
       summary: {
@@ -355,7 +522,14 @@ export const getProfitabilitySummary = async (req, res) => {
         lowMarginCount
       },
       categoryBreakdown,
-      projects: projectBreakdown
+      projects: projectBreakdown,
+      allCosts,
+      rawProjects: projects.map((p) => ({
+        id: p.projectId || p._id,
+        _id: p._id,
+        name: p.name,
+        customerName: p.customer?.name || '—'
+      }))
     });
   } catch (error) {
     console.error('Error in getProfitabilitySummary:', error);

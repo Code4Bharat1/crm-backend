@@ -465,7 +465,7 @@ export const sendFollowUpEmail = async (req, res) => {
 
 export const sendDirectEmail = async (req, res) => {
     try {
-        const { to, subject, message, leadId } = req.body;
+        const { to, subject, message, leadId, targetStage, emailType } = req.body;
 
         if (!to || !subject || !message) {
             return res.status(400).json({ message: "Recipient (to), subject, and message are required." });
@@ -522,13 +522,24 @@ export const sendDirectEmail = async (req, res) => {
 
         if (updatedLead) {
             const prevStage = updatedLead.stage;
-            if (updatedLead.stage === 'New') {
-                updatedLead.stage = 'Contacted';
+            
+            // Map stage from targetStage or emailType
+            let newStage = targetStage;
+            if (!newStage) {
+                if (emailType === 'quotation' || (subject && subject.toLowerCase().includes('quotation'))) {
+                    newStage = 'Quotation Sent';
+                } else if (emailType === 'meeting' || (subject && subject.toLowerCase().includes('meeting'))) {
+                    newStage = 'Potential';
+                } else {
+                    newStage = 'Contacted';
+                }
             }
+
+            updatedLead.stage = newStage;
             updatedLead.customerEmail = updatedLead.customerEmail || to.trim();
             updatedLead.lastRepliedAt = sentDate;
             updatedLead.notes = (updatedLead.notes || '') +
-                `\n\n[Sent from CRM] Outgoing email sent to ${to.trim()} on ${sentDate.toLocaleString()}.\nSubject: "${subject.trim()}"\nMessage:\n${message}`;
+                `\n\n[Sent from CRM (${emailType || 'Direct Email'})] Outgoing email sent to ${to.trim()} on ${sentDate.toLocaleString()}.\nLead stage moved to: ${newStage}.\nSubject: "${subject.trim()}"\nMessage:\n${message}`;
             await updatedLead.save();
 
             return res.json({

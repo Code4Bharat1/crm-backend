@@ -29,7 +29,9 @@ const COLLECTIONS_TO_CLEAN = [
   'whatsappmessages',
   'emails',
   'expenseclaims',
-  'salesdocuments'
+  'salesdocuments',
+  'attendances',
+  'notifications'
 ];
 
 async function cleanDummyData() {
@@ -56,6 +58,13 @@ async function cleanDummyData() {
       console.error(`❌ Error cleaning [${collName}]:`, err.message);
     }
   }
+
+  // Reset attendance counters on employees
+  await mongoose.connection.db.collection('employees').updateMany(
+    {},
+    { $set: { presentDays: 0, leaveDays: 0, overtimeHours: 0 } }
+  );
+  console.log('🔄 Reset employee attendance counters (presentDays: 0, leaveDays: 0, overtimeHours: 0).');
 
   // Verify preserved collections
   console.log('\n🔒 PRESERVED ESSENTIAL COLLECTIONS:');

@@ -32,6 +32,10 @@ const companySettingsSchema = new mongoose.Schema({
   signatureText:   { type: String, default: 'For Nexcore Alliance Pvt. Ltd.' },
   footerNote:      { type: String, default: 'This is a computer generated document. No signature required.' },
   termsAndConditions: { type: String, default: '1. Payment due within 30 days of invoice date.\n2. Goods once sold will not be taken back.\n3. Subject to Pune jurisdiction.' },
+  weekendPolicy: {
+    saturdayOff: { type: Boolean, default: true },
+    sundayOff:   { type: Boolean, default: true }
+  }
 }, { timestamps: true });
 
 export default mongoose.model('CompanySettings', companySettingsSchema);

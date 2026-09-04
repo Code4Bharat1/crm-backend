@@ -1,4 +1,5 @@
 import User from '../models/User.js';
+import Employee from '../models/Employee.js';
 import jwt from 'jsonwebtoken';
 import { getPermissionsForRole } from '../config/permissions.js';
 import { createAuditLog } from '../services/auditLogService.js';
@@ -37,6 +38,17 @@ const loginUser = async (req, res) => {
   const user = await User.findOne({ email });
   if (user && (await user.matchPassword(password))) {
     const permissions = getPermissionsForRole(user.role);
+
+    // Auto-link employeeId if not set
+    let employeeId = user.employeeId;
+    if (!employeeId) {
+      const emp = await Employee.findOne({ email: user.email });
+      if (emp) {
+        employeeId = emp._id;
+        user.employeeId = emp._id;
+        await user.save().catch(() => {});
+      }
+    }
     
     // We mock req.user for the audit log since protect middleware hasn't run
     req.user = user;
@@ -57,7 +69,8 @@ const loginUser = async (req, res) => {
           id: user._id,
           name: user.name,
           email: user.email,
-          role: user.role
+          role: user.role,
+          employeeId: employeeId || undefined
         },
         permissions,
         token: generateToken(user._id)

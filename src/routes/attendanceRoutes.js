@@ -8,15 +8,17 @@ import {
   getAttendanceStats,
   punchIn,
   punchOut,
-  getTodayStatus
+  getTodayStatus,
+  getWeekendPolicy,
+  updateWeekendPolicy
 } from '../controllers/attendanceController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 // Static routes
-router.route('/summary').get(getAttendanceSummary);
-router.route('/stats').get(getAttendanceStats);
+router.route('/summary').get(protect, getAttendanceSummary);
+router.route('/stats').get(protect, getAttendanceStats);
 
 // Punch routes
 router.route('/punch-in').post(protect, punchIn);
@@ -25,8 +27,13 @@ router.route('/today').get(protect, getTodayStatus);
 
 // Dynamic routes
 router.route('/')
-  .get(getAttendance)
-  .post(createAttendance);
+  .get(protect, getAttendance)
+  .post(protect, createAttendance);
+
+// Weekend policy routes (Admin, HR, Manager)
+router.route('/weekend-policy')
+  .get(protect, getWeekendPolicy)
+  .put(protect, updateWeekendPolicy);
 
 router.route('/:id')
   .put(updateAttendance)

@@ -1,6 +1,8 @@
 import ServiceRequest from '../models/ServiceRequest.js';
 import Warranty from '../models/Warranty.js';
 import SerialNumber from '../models/SerialNumber.js';
+import Employee from '../models/Employee.js';
+import Notification from '../models/Notification.js';
 
 // GET /api/service-requests — List service requests with filtering & KPIs
 export const getServiceRequests = async (req, res) => {
@@ -165,6 +167,42 @@ export const createServiceRequest = async (req, res) => {
       );
     }
 
+    // Trigger Notification for the assigned Technician / Engineer
+    if (serviceRequest.engineer?.name && serviceRequest.engineer.name !== 'Unassigned') {
+      try {
+        const emp = await Employee.findOne({
+          $or: [
+            { fullName: { $regex: `^${serviceRequest.engineer.name.trim()}$`, $options: 'i' } },
+            { firstName: { $regex: `^${serviceRequest.engineer.name.trim()}$`, $options: 'i' } }
+          ]
+        });
+
+        const scheduledStr = serviceRequest.scheduledOn 
+          ? new Date(serviceRequest.scheduledOn).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+          : 'Immediate / Pending';
+
+        await Notification.create({
+          recipient: serviceRequest.engineer.name,
+          recipientEmail: emp?.email || '',
+          recipientRole: emp?.role || 'Technician',
+          title: `Service Request Assigned: ${serviceRequest.requestId}`,
+          detail: `You have been assigned to service ticket ${serviceRequest.requestId} (${serviceRequest.issue}) for ${serviceRequest.customer?.name || 'Customer'}. Equipment: ${serviceRequest.productName}${serviceRequest.serialNo ? ` (SN: ${serviceRequest.serialNo})` : ''}. Priority: ${serviceRequest.priority}. Scheduled: ${scheduledStr}.`,
+          type: 'Service',
+          severity: serviceRequest.priority === 'Urgent' ? 'danger' : serviceRequest.priority === 'High' ? 'warning' : 'info',
+          link: '/service',
+          projectId: serviceRequest.project?.id || '',
+          projectName: serviceRequest.project?.name || '',
+          customerName: serviceRequest.customer?.name || '',
+          revenue: serviceRequest.serviceCharges || 0,
+          read: false,
+          at: new Date()
+        });
+        console.log(`🔔 [Notification] Service assignment notification created for Technician: ${serviceRequest.engineer.name}`);
+      } catch (notifErr) {
+        console.error('⚠️ [Notification] Failed to create service assignment notification:', notifErr);
+      }
+    }
+
     res.status(201).json({
       success: true,
       message: 'Service request logged successfully',
@@ -188,6 +226,7 @@ export const updateServiceRequest = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Service request not found' });
     }
 
+    const oldEngineer = request.engineer?.name;
     Object.assign(request, req.body);
 
     if (req.body.status === 'Resolved' && !request.resolvedOn) {
@@ -195,6 +234,38 @@ export const updateServiceRequest = async (req, res) => {
     }
 
     await request.save();
+
+    // Trigger notification if engineer is newly assigned or changed
+    if (request.engineer?.name && request.engineer.name !== 'Unassigned' && request.engineer.name !== oldEngineer) {
+      try {
+        const emp = await Employee.findOne({
+          $or: [
+            { fullName: { $regex: `^${request.engineer.name.trim()}$`, $options: 'i' } },
+            { firstName: { $regex: `^${request.engineer.name.trim()}$`, $options: 'i' } }
+          ]
+        });
+
+        await Notification.create({
+          recipient: request.engineer.name,
+          recipientEmail: emp?.email || '',
+          recipientRole: emp?.role || 'Technician',
+          title: `Service Request Reassigned: ${request.requestId}`,
+          detail: `You have been assigned to service ticket ${request.requestId} (${request.issue}) for ${request.customer?.name || 'Customer'}. Priority: ${request.priority}.`,
+          type: 'Service',
+          severity: request.priority === 'Urgent' ? 'danger' : 'info',
+          link: '/service',
+          projectId: request.project?.id || '',
+          projectName: request.project?.name || '',
+          customerName: request.customer?.name || '',
+          revenue: request.serviceCharges || 0,
+          read: false,
+          at: new Date()
+        });
+        console.log(`🔔 [Notification] Service reassignment notification created for Technician: ${request.engineer.name}`);
+      } catch (notifErr) {
+        console.error('⚠️ [Notification] Failed to create service reassignment notification:', notifErr);
+      }
+    }
 
     res.json({
       success: true,

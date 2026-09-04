@@ -144,6 +144,42 @@ export const progressLeadByContact = async (req, res) => {
   }
 };
 
+/**
+ * PATCH /api/sales/leads/:id/stage
+ * Updates a lead's stage directly (e.g., to "Quotation Sent", "Contacted", etc.)
+ */
+export const updateLeadStage = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { stage } = req.body;
+
+    if (!stage) {
+      return res.status(400).json({ message: 'Stage is required' });
+    }
+
+    const lead = await Lead.findOne({ id });
+    if (!lead) {
+      return res.status(404).json({ message: 'Lead not found' });
+    }
+
+    const prevStage = lead.stage;
+    lead.stage = stage;
+    lead.notes = (lead.notes || '') + `\n\n[Stage Updated] Stage changed from ${prevStage} to ${stage} on ${new Date().toLocaleString()}.`;
+    await lead.save();
+
+    return res.json({
+      success: true,
+      message: `Lead stage updated to ${stage}`,
+      lead,
+      prevStage,
+      stage
+    });
+  } catch (error) {
+    console.error('Error updating lead stage:', error);
+    res.status(500).json({ message: 'Error updating lead stage', error: error.message });
+  }
+};
+
 export const getDocuments = async (req, res) => {
   try {
     const { type } = req.query; // filter by Quotation, Sales Order, Invoice
