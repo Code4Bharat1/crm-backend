@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename);
 
 // Existing routes
 import authRoutes from './routes/authRoutes.js';
+import auditLogRoutes from './routes/auditLogRoutes.js';
 import customerRoutes from './routes/customerRoutes.js';
 import salesRoutes from './routes/salesRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
@@ -48,6 +49,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // ─── Existing Routes ────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
+app.use('/api/audit-logs', auditLogRoutes);
 app.use('/api/customers', customerRoutes);
 app.use('/api/sales', salesRoutes);
 app.use('/api/ai', aiRoutes);

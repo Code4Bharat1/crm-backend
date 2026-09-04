@@ -1,4 +1,5 @@
 import Employee from '../models/Employee.js';
+import { createAuditLog } from '../services/auditLogService.js';
 import Role from '../models/Role.js';
 import User from '../models/User.js';
 import { sendWelcomeEmail } from '../utils/sendWelcomeEmail.js';
@@ -69,6 +70,27 @@ export const createEmployee = async (req, res) => {
     // Default password for newly onboarded employee
     const defaultPassword = process.env.DEFAULT_EMPLOYEE_PASSWORD || '123456';
 
+     await createAuditLog({
+      req,
+      action: 'UPDATE',
+      module: 'EMPLOYEE',
+      resourceType: 'Employee',
+      resourceId: employee._id,
+      description: `Updated employee ${employee.employeeCode}`,
+      severity: 'INFO'
+    });
+
+    await createAuditLog({
+      req,
+      action: 'UPDATE',
+      module: 'EMPLOYEE',
+      resourceType: 'Employee',
+      resourceId: employee._id,
+      description: `Updated employee ${employee.employeeCode}`,
+      severity: 'INFO'
+    });
+
+
     // Create or sync user login credentials
     try {
       let user = await User.findOne({ email: newEmployee.email });
@@ -88,6 +110,16 @@ export const createEmployee = async (req, res) => {
 
     // Send welcome email with credentials and change password instructions
     const emailResult = await sendWelcomeEmail(newEmployee, defaultPassword);
+
+    await createAuditLog({
+      req,
+      action: 'CREATE',
+      module: 'EMPLOYEE',
+      resourceType: 'Employee',
+      resourceId: newEmployee._id,
+      description: `Created employee ${employeeCode} - ${fullName}`,
+      severity: 'INFO'
+    });
 
     res.status(201).json({
       success: true,
@@ -200,6 +232,7 @@ export const updateEmployee = async (req, res) => {
 
     await employee.save();
 
+   
     // Sync corresponding User account if exists
     try {
       const user = await User.findOne({ $or: [{ employeeId: employee._id }, { email: employee.email }] });
@@ -240,6 +273,17 @@ export const deleteEmployee = async (req, res) => {
     }
     employee.isActive = false;
     await employee.save();
+    
+    await createAuditLog({
+      req,
+      action: 'DELETE',
+      module: 'EMPLOYEE',
+      resourceType: 'Employee',
+      resourceId: employee._id,
+      description: `Deleted employee ${employee.employeeCode}`,
+      severity: 'WARNING'
+    });
+    
     res.json({ success: true, message: 'Employee deleted successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -282,6 +326,15 @@ export const exportEmployees = async (req, res) => {
     res.header('Content-Type', 'text/csv');
     res.attachment('employees.csv');
     res.send(csvStr);
+
+    await createAuditLog({
+      req,
+      action: 'EXPORT',
+      module: 'EMPLOYEE',
+      description: 'Exported employees list',
+      severity: 'INFO'
+    });
+
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
