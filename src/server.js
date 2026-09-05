@@ -3,6 +3,7 @@ import { fileURLToPath } from 'url';
 import express from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import connectDB from './config/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -44,7 +45,11 @@ connectDB();
 const app = express();
 
 app.use(express.json({ limit: '10mb' }));
-app.use(cors());
+app.use(cookieParser());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  credentials: true
+}));
 
 // Serve static uploads
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
