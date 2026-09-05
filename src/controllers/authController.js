@@ -1,10 +1,26 @@
 import User from '../models/User.js';
 import Employee from '../models/Employee.js';
 import RefreshToken from '../models/RefreshToken.js';
+import Role from '../models/Role.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { getPermissionsForRole } from '../config/permissions.js';
+import { findMatchingRoleInList } from '../utils/roleMatcher.js';
 import { createAuditLog } from '../services/auditLogService.js';
+
+/**
+ * Looks up the granular per-sidebar-module permission map for a user's role
+ * (as configured in Users & Roles), fuzzy-matched against the role name so
+ * "sales" / "Sales" / "Salesperson" all resolve to the same Role document.
+ * Returns null when no matching role has been configured yet, so callers can
+ * fall back to showing everything rather than locking the user out.
+ */
+const getSidebarPermissionsForRole = async (roleName) => {
+  if (!roleName) return null;
+  const allRoles = await Role.find();
+  const match = findMatchingRoleInList(roleName, allRoles);
+  return match ? match.permissions : null;
+};
 
 const generateToken = (id, type = 'access') => {
   const secret = type === 'access' ? process.env.JWT_SECRET : (process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET);
@@ -43,6 +59,7 @@ const loginUser = async (req, res) => {
   const user = await User.findOne({ email });
   if (user && (await user.matchPassword(password))) {
     const permissions = getPermissionsForRole(user.role);
+    const sidebarPermissions = await getSidebarPermissionsForRole(user.role);
 
     // Auto-link employeeId if not set
     let employeeId = user.employeeId;
@@ -97,6 +114,7 @@ const loginUser = async (req, res) => {
           employeeId: employeeId || undefined
         },
         permissions,
+        sidebarPermissions,
         accessToken
       }
     });
@@ -139,6 +157,7 @@ const refreshAccessToken = async (req, res) => {
     }
 
     const permissions = getPermissionsForRole(user.role);
+    const sidebarPermissions = await getSidebarPermissionsForRole(user.role);
     const newAccessToken = generateToken(user._id, 'access');
     const newRefreshToken = generateToken(user._id, 'refresh');
     const newDecodedRefresh = jwt.verify(newRefreshToken, process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET);
@@ -183,7 +202,8 @@ const refreshAccessToken = async (req, res) => {
           role: user.role,
           employeeId: user.employeeId || undefined
         },
-        permissions
+        permissions,
+        sidebarPermissions
       }
     });
   } catch (error) {
