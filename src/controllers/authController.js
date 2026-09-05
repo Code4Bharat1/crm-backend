@@ -6,6 +6,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { getPermissionsForRole } from '../config/permissions.js';
 import { findMatchingRoleInList } from '../utils/roleMatcher.js';
+import { applyAssignmentOverrides } from '../utils/assignmentAccess.js';
 import { createAuditLog } from '../services/auditLogService.js';
 
 /**
@@ -59,7 +60,7 @@ const loginUser = async (req, res) => {
   const user = await User.findOne({ email });
   if (user && (await user.matchPassword(password))) {
     const permissions = getPermissionsForRole(user.role);
-    const sidebarPermissions = await getSidebarPermissionsForRole(user.role);
+    let sidebarPermissions = await getSidebarPermissionsForRole(user.role);
 
     // Auto-link employeeId if not set
     let employeeId = user.employeeId;
@@ -71,6 +72,8 @@ const loginUser = async (req, res) => {
         await user.save().catch(() => {});
       }
     }
+
+    sidebarPermissions = await applyAssignmentOverrides(sidebarPermissions, employeeId);
 
     const accessToken = generateToken(user._id, 'access');
     const refreshToken = generateToken(user._id, 'refresh');
@@ -157,7 +160,15 @@ const refreshAccessToken = async (req, res) => {
     }
 
     const permissions = getPermissionsForRole(user.role);
-    const sidebarPermissions = await getSidebarPermissionsForRole(user.role);
+    let sidebarPermissions = await getSidebarPermissionsForRole(user.role);
+
+    let employeeId = user.employeeId;
+    if (!employeeId) {
+      const emp = await Employee.findOne({ email: user.email });
+      if (emp) employeeId = emp._id;
+    }
+    sidebarPermissions = await applyAssignmentOverrides(sidebarPermissions, employeeId);
+
     const newAccessToken = generateToken(user._id, 'access');
     const newRefreshToken = generateToken(user._id, 'refresh');
     const newDecodedRefresh = jwt.verify(newRefreshToken, process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET);
