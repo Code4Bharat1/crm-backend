@@ -1,10 +1,27 @@
 import User from '../models/User.js';
 import Employee from '../models/Employee.js';
 import RefreshToken from '../models/RefreshToken.js';
+import Role from '../models/Role.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { getPermissionsForRole } from '../config/permissions.js';
 import { createAuditLog } from '../services/auditLogService.js';
+
+const resolveUserPermissions = async (roleName) => {
+  let permissions = getPermissionsForRole(roleName);
+  if (!roleName) return permissions;
+  try {
+    const dbRole = await Role.findOne({
+      name: { $regex: new RegExp(`^${roleName.trim()}$`, 'i') }
+    });
+    if (dbRole && dbRole.permissions) {
+      permissions = { ...permissions, ...dbRole.permissions, modulePermissions: dbRole.permissions };
+    }
+  } catch (err) {
+    console.warn('Could not query role permissions from DB:', err.message);
+  }
+  return permissions;
+};
 
 const generateToken = (id, type = 'access') => {
   const secret = type === 'access' ? process.env.JWT_SECRET : (process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET);
@@ -42,7 +59,7 @@ const loginUser = async (req, res) => {
 
   const user = await User.findOne({ email });
   if (user && (await user.matchPassword(password))) {
-    const permissions = getPermissionsForRole(user.role);
+    const permissions = await resolveUserPermissions(user.role);
 
     // Auto-link employeeId if not set
     let employeeId = user.employeeId;
@@ -138,7 +155,7 @@ const refreshAccessToken = async (req, res) => {
       return res.status(401).json({ success: false, message: 'User not found' });
     }
 
-    const permissions = getPermissionsForRole(user.role);
+    const permissions = await resolveUserPermissions(user.role);
     const newAccessToken = generateToken(user._id, 'access');
     const newRefreshToken = generateToken(user._id, 'refresh');
     const newDecodedRefresh = jwt.verify(newRefreshToken, process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET);
