@@ -116,10 +116,10 @@ export const updateRole = async (req, res) => {
     }
 
     if (permissions) {
-      role.permissions = {
-        ...(role.permissions || {}),
-        ...permissions,
-      };
+      // Replace outright rather than merge: the editor always submits the
+      // full current module set, so merging would let permission keys for
+      // modules that no longer exist (or were unchecked) linger forever.
+      role.permissions = permissions;
       role.markModified('permissions');
     }
 
