@@ -135,6 +135,41 @@ export const recordPayment = async (req, res) => {
   }
 };
 
+// GET /api/invoices/payments-ledger — every recorded payment across all
+// invoices, flattened into one list. Real received-money records already
+// tied to an invoice/customer -- this is the reconciliation ledger; there is
+// no live bank feed to auto-match against yet.
+export const getPaymentsLedger = async (req, res) => {
+  try {
+    const invoicesWithPayments = await SalesInvoice.find({ 'payments.0': { $exists: true } })
+      .select('invoiceNo customer payments grandTotal');
+
+    const rows = [];
+    invoicesWithPayments.forEach((inv) => {
+      inv.payments.forEach((p) => {
+        rows.push({
+          id: String(p._id),
+          invoiceNo: inv.invoiceNo,
+          invoiceId: inv._id,
+          customerId: inv.customer?.id,
+          customerName: inv.customer?.name || 'Unknown',
+          amount: p.amount,
+          date: p.date,
+          mode: p.mode,
+          reference: p.reference || '',
+          notes: p.notes || '',
+          recordedBy: p.recordedBy || '',
+        });
+      });
+    });
+
+    rows.sort((a, b) => new Date(b.date) - new Date(a.date));
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching payments ledger', error: error.message });
+  }
+};
+
 // GET /api/invoices/overdue — find overdue invoices and update status
 export const checkOverdue = async (req, res) => {
   try {
