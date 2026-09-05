@@ -5,8 +5,10 @@ import Role from '../models/Role.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { getPermissionsForRole } from '../config/permissions.js';
+import { findMatchingRoleInList } from '../utils/roleMatcher.js';
 import { createAuditLog } from '../services/auditLogService.js';
 
+<<<<<<< HEAD
 const resolveUserPermissions = async (roleName) => {
   let permissions = getPermissionsForRole(roleName);
   if (!roleName) return permissions;
@@ -21,6 +23,20 @@ const resolveUserPermissions = async (roleName) => {
     console.warn('Could not query role permissions from DB:', err.message);
   }
   return permissions;
+=======
+/**
+ * Looks up the granular per-sidebar-module permission map for a user's role
+ * (as configured in Users & Roles), fuzzy-matched against the role name so
+ * "sales" / "Sales" / "Salesperson" all resolve to the same Role document.
+ * Returns null when no matching role has been configured yet, so callers can
+ * fall back to showing everything rather than locking the user out.
+ */
+const getSidebarPermissionsForRole = async (roleName) => {
+  if (!roleName) return null;
+  const allRoles = await Role.find();
+  const match = findMatchingRoleInList(roleName, allRoles);
+  return match ? match.permissions : null;
+>>>>>>> 7456b91e34c143d78a5afb15500c482f604307f2
 };
 
 const generateToken = (id, type = 'access') => {
@@ -59,7 +75,12 @@ const loginUser = async (req, res) => {
 
   const user = await User.findOne({ email });
   if (user && (await user.matchPassword(password))) {
+<<<<<<< HEAD
     const permissions = await resolveUserPermissions(user.role);
+=======
+    const permissions = getPermissionsForRole(user.role);
+    const sidebarPermissions = await getSidebarPermissionsForRole(user.role);
+>>>>>>> 7456b91e34c143d78a5afb15500c482f604307f2
 
     // Auto-link employeeId if not set
     let employeeId = user.employeeId;
@@ -114,6 +135,7 @@ const loginUser = async (req, res) => {
           employeeId: employeeId || undefined
         },
         permissions,
+        sidebarPermissions,
         accessToken
       }
     });
@@ -155,7 +177,12 @@ const refreshAccessToken = async (req, res) => {
       return res.status(401).json({ success: false, message: 'User not found' });
     }
 
+<<<<<<< HEAD
     const permissions = await resolveUserPermissions(user.role);
+=======
+    const permissions = getPermissionsForRole(user.role);
+    const sidebarPermissions = await getSidebarPermissionsForRole(user.role);
+>>>>>>> 7456b91e34c143d78a5afb15500c482f604307f2
     const newAccessToken = generateToken(user._id, 'access');
     const newRefreshToken = generateToken(user._id, 'refresh');
     const newDecodedRefresh = jwt.verify(newRefreshToken, process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET);
@@ -200,7 +227,8 @@ const refreshAccessToken = async (req, res) => {
           role: user.role,
           employeeId: user.employeeId || undefined
         },
-        permissions
+        permissions,
+        sidebarPermissions
       }
     });
   } catch (error) {

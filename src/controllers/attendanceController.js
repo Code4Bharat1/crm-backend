@@ -2,6 +2,7 @@ import Attendance from '../models/Attendance.js';
 import Employee from '../models/Employee.js';
 import CompanySettings from '../models/CompanySettings.js';
 import { createAuditLog } from '../services/auditLogService.js';
+import { getISTDateString } from '../utils/dateUtils.js';
 
 export const createAttendance = async (req, res) => {
   try {
@@ -283,7 +284,7 @@ export const getAttendanceStats = async (req, res) => {
         if (emp) userEmpId = emp._id;
       }
       const myRecords = await Attendance.find({ employeeId: userEmpId });
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = getISTDateString();
       const todayRec = myRecords.find(r => r.date === todayStr);
       const myPresent = myRecords.filter(r => r.status === 'Present' || r.status === 'Half Day').length;
       const myLeave = myRecords.filter(r => r.status === 'Leave').length;
@@ -309,7 +310,7 @@ export const getAttendanceStats = async (req, res) => {
       });
     }
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getISTDateString();
     const totalEmployees = await Employee.countDocuments({ isActive: true });
     
     // Today's attendance
@@ -374,7 +375,7 @@ export const punchIn = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Employee not found' });
     }
 
-    const todayDate = new Date().toISOString().split('T')[0];
+    const todayDate = getISTDateString();
     const punchTime = new Date();
     const source = req.body?.source || 'Employee Panel (Web)';
     const remarks = req.body?.remarks || 'Clocked in via Employee Self-Service Panel';
@@ -463,7 +464,7 @@ export const punchOut = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Employee not found' });
     }
 
-    const todayDate = new Date().toISOString().split('T')[0];
+    const todayDate = getISTDateString();
     const existing = await Attendance.findOne({ employeeId, date: todayDate });
 
     if (!existing || !existing.checkIn) {
@@ -545,7 +546,7 @@ export const getTodayStatus = async (req, res) => {
     }
 
     const employee = await Employee.findById(employeeId).select('fullName employeeCode role department');
-    const todayDate = new Date().toISOString().split('T')[0];
+    const todayDate = getISTDateString();
     const existing = await Attendance.findOne({ employeeId, date: todayDate });
 
     if (!existing || !existing.checkIn) {
