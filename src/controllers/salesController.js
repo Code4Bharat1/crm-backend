@@ -1,5 +1,6 @@
 import Lead from '../models/Lead.js';
 import SalesDocument from '../models/SalesDocument.js';
+import { convertLeadToCustomer, WON_STAGE } from '../utils/leadConversion.js';
 
 // --- LEADS ---
 
@@ -45,6 +46,21 @@ export const createLead = async (req, res) => {
 
     const newLead = new Lead(req.body);
     const savedLead = await newLead.save();
+
+    // A lead can be filed straight at "Won" (e.g. repeat order logged after the fact).
+    if (savedLead.stage === WON_STAGE) {
+      const conversion = await convertLeadToCustomer(savedLead).catch(err => {
+        console.error(`[Lead ${savedLead.id}] Auto-conversion failed:`, err.message);
+        return null;
+      });
+      if (conversion) {
+        return res.status(201).json({
+          ...savedLead.toObject(),
+          conversion: { customer: conversion.customer, created: conversion.created },
+        });
+      }
+    }
+
     res.status(201).json(savedLead);
   } catch (error) {
     res.status(400).json({ message: 'Error creating lead', error: error.message });
@@ -166,6 +182,34 @@ export const updateLeadStage = async (req, res) => {
     lead.stage = stage;
     lead.notes = (lead.notes || '') + `\n\n[Stage Updated] Stage changed from ${prevStage} to ${stage} on ${new Date().toLocaleString()}.`;
     await lead.save();
+
+    // Moving into Won auto-creates (or links) the matching customer record — once per lead.
+    if (stage === WON_STAGE && prevStage !== WON_STAGE) {
+      try {
+        const { customer, created, alreadyConverted } = await convertLeadToCustomer(lead);
+        return res.json({
+          success: true,
+          message: created
+            ? `Lead stage updated to ${stage} — customer ${customer.id} created.`
+            : `Lead stage updated to ${stage} — linked to existing customer ${customer.id}.`,
+          lead,
+          prevStage,
+          stage,
+          conversion: { customer, created, alreadyConverted },
+        });
+      } catch (convErr) {
+        // The stage change itself succeeded; report the conversion failure without losing it.
+        console.error(`[Lead ${lead.id}] Auto-conversion failed:`, convErr.message);
+        return res.json({
+          success: true,
+          message: `Lead stage updated to ${stage}, but customer creation failed: ${convErr.message}`,
+          lead,
+          prevStage,
+          stage,
+          conversion: null,
+        });
+      }
+    }
 
     return res.json({
       success: true,

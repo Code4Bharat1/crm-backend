@@ -14,6 +14,8 @@ const leadSchema = new mongoose.Schema({
   sourceEmailId: { type: String, default: null }, // UID of the email this lead was created from
   customerEmail: { type: String, default: null },
   lastRepliedAt: { type: Date },
+  convertedCustomerId: { type: String, default: null }, // CUST-xxx created/linked when the lead was Won
+  convertedAt: { type: Date, default: null },
 }, { timestamps: true });
 
 export default mongoose.model('Lead',leadSchema);
