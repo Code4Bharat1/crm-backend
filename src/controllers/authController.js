@@ -9,6 +9,22 @@ import { findMatchingRoleInList } from '../utils/roleMatcher.js';
 import { applyAssignmentOverrides } from '../utils/assignmentAccess.js';
 import { createAuditLog } from '../services/auditLogService.js';
 
+const resolveUserPermissions = async (roleName) => {
+  let permissions = getPermissionsForRole(roleName);
+  if (!roleName) return permissions;
+  try {
+    const dbRole = await Role.findOne({
+      name: { $regex: new RegExp(`^${roleName.trim()}$`, 'i') }
+    });
+    if (dbRole && dbRole.permissions) {
+      permissions = { ...permissions, ...dbRole.permissions, modulePermissions: dbRole.permissions };
+    }
+  } catch (err) {
+    console.warn('Could not query role permissions from DB:', err.message);
+  }
+  return permissions;
+};
+
 /**
  * Looks up the granular per-sidebar-module permission map for a user's role
  * (as configured in Users & Roles), fuzzy-matched against the role name so
@@ -59,7 +75,7 @@ const loginUser = async (req, res) => {
 
   const user = await User.findOne({ email });
   if (user && (await user.matchPassword(password))) {
-    const permissions = getPermissionsForRole(user.role);
+    const permissions = await resolveUserPermissions(user.role);
     let sidebarPermissions = await getSidebarPermissionsForRole(user.role);
 
     // Auto-link employeeId if not set
@@ -159,7 +175,7 @@ const refreshAccessToken = async (req, res) => {
       return res.status(401).json({ success: false, message: 'User not found' });
     }
 
-    const permissions = getPermissionsForRole(user.role);
+    const permissions = await resolveUserPermissions(user.role);
     let sidebarPermissions = await getSidebarPermissionsForRole(user.role);
 
     let employeeId = user.employeeId;
