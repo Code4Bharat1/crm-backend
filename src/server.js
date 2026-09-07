@@ -47,9 +47,35 @@ const app = express();
 
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
+// ─── CORS Configuration ──────────────────────────────────────────────────
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'https://crm.nexcorealliance.com',
+  'https://api-crm.nexcorealliance.com',
+  ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',').map(s => s.trim()) : [])
+];
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true
+  origin: function (origin, callback) {
+    // Allow non-browser requests (e.g. mobile apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+
+    const isAllowed = allowedOrigins.includes(origin) ||
+      /^https?:\/\/([a-z0-9-]+\.)*nexcorealliance\.com(:\d+)?$/i.test(origin) ||
+      /^http:\/\/localhost(:\d+)?$/i.test(origin) ||
+      /^http:\/\/127\.0\.0\.1(:\d+)?$/i.test(origin);
+
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.warn(`[CORS Blocked] Origin not allowed: ${origin}`);
+      callback(null, false);
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-user-role', 'X-Requested-With', 'Accept', 'Origin']
 }));
 
 // Serve static uploads
