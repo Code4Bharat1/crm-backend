@@ -11,7 +11,8 @@ import {
   createDocument, 
   getDocumentById,
   getSalesPerformance,
-  updateSalespersonTarget 
+  updateSalespersonTarget,
+  getSalespeopleList
 } from '../controllers/salesController.js';
 
 const router = express.Router();
@@ -60,6 +61,7 @@ const requireAdminOrManager = async (req, res, next) => {
 
 router.get('/performance', getSalesPerformance);
 router.patch('/performance/target/:id', requireAdminOrManager, updateSalespersonTarget);
+router.get('/salespeople', getSalespeopleList);
 
 
 router.route('/leads')
