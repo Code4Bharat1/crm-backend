@@ -26,6 +26,10 @@ export const createAuditLog = async ({
       userId = req.user._id;
       userName = req.user.name;
       userRole = req.user.role;
+    } else if (metadata?.email) {
+      userName = metadata.email;
+    } else if (req?.body?.email) {
+      userName = req.body.email;
     }
 
     // Extract IP address correctly, prioritizing x-forwarded-for if behind a proxy
@@ -33,8 +37,12 @@ export const createAuditLog = async ({
     if (req) {
       ipAddress = req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || req.ip || 'unknown';
       // Handle IPv4 mapped IPv6 addresses (e.g., ::ffff:127.0.0.1)
-      if (typeof ipAddress === 'string' && ipAddress.includes('::ffff:')) {
-        ipAddress = ipAddress.split('::ffff:')[1];
+      if (typeof ipAddress === 'string') {
+        if (ipAddress.includes('::ffff:')) {
+          ipAddress = ipAddress.split('::ffff:')[1];
+        } else if (ipAddress === '::1') {
+          ipAddress = '127.0.0.1';
+        }
       }
     }
 

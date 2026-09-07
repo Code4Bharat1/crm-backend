@@ -15,6 +15,7 @@ const employeeSchema = new mongoose.Schema({
   presentDays: { type: Number, default: 0 },
   leaveDays: { type: Number, default: 0 },
   overtimeHours: { type: Number, default: 0 },
+  target: { type: Number, default: 1500000 },
   isActive: { type: Boolean, default: true }
 }, { timestamps: true });
 

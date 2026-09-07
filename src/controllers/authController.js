@@ -134,6 +134,7 @@ const loginUser = async (req, res) => {
         },
         permissions,
         sidebarPermissions,
+        token: accessToken,
         accessToken
       }
     });
@@ -144,7 +145,8 @@ const loginUser = async (req, res) => {
       module: 'AUTHENTICATION',
       description: `Failed login attempt for email: ${email}`,
       severity: 'WARNING',
-      status: 'FAILED'
+      status: 'FAILED',
+      metadata: { email }
     });
     res.status(401).json({ message: 'Invalid email or password' });
   }

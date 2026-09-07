@@ -1,5 +1,9 @@
 import Lead from '../models/Lead.js';
 import SalesDocument from '../models/SalesDocument.js';
+import Employee from '../models/Employee.js';
+import SalesOrder from '../models/SalesOrder.js';
+import Quotation from '../models/Quotation.js';
+import Customer from '../models/Customer.js';
 import { convertLeadToCustomer, WON_STAGE } from '../utils/leadConversion.js';
 
 // --- LEADS ---
@@ -254,3 +258,213 @@ export const getDocumentById = async (req, res) => {
     res.status(500).json({ message: 'Server error' });
   }
 };
+
+/**
+ * GET /api/sales/performance
+ * Computes live, authentic salesperson performance metrics from real MongoDB collections.
+ */
+export const getSalesPerformance = async (req, res) => {
+  try {
+    // 1. Fetch sales employees
+    let employees = await Employee.find({
+      $or: [
+        { role: { $regex: /sales/i } },
+        { department: { $regex: /sales/i } }
+      ]
+    }).lean();
+
+    if (!employees || employees.length === 0) {
+      employees = await Employee.find({ isActive: true }).lean();
+    }
+
+    // 2. Aggregate confirmed sales orders grouped by salesperson
+    const salesOrders = await SalesOrder.aggregate([
+      { $match: { status: { $ne: 'Cancelled' } } },
+      {
+        $group: {
+          _id: { $trim: { input: { $ifNull: ['$salesperson', 'Unassigned'] } } },
+          totalAchieved: { $sum: '$grandTotal' },
+          orderCount: { $sum: 1 }
+        }
+      }
+    ]);
+    const ordersMap = new Map();
+    salesOrders.forEach(o => {
+      if (o._id) ordersMap.set(o._id.trim().toLowerCase(), o);
+    });
+
+    // 3. Aggregate quotations grouped by salesperson
+    const quotations = await Quotation.aggregate([
+      {
+        $group: {
+          _id: { $trim: { input: { $ifNull: ['$salesperson', 'Unassigned'] } } },
+          quotationCount: { $sum: 1 },
+          totalQuoted: { $sum: '$grandTotal' }
+        }
+      }
+    ]);
+    const quotationsMap = new Map();
+    quotations.forEach(q => {
+      if (q._id) quotationsMap.set(q._id.trim().toLowerCase(), q);
+    });
+
+    // 4. Aggregate leads grouped by salesperson
+    const leads = await Lead.aggregate([
+      {
+        $group: {
+          _id: { $trim: { input: { $ifNull: ['$salesperson', 'Unassigned'] } } },
+          totalLeads: { $sum: 1 },
+          wonLeads: { $sum: { $cond: [{ $eq: ['$stage', 'Won'] }, 1, 0] } }
+        }
+      }
+    ]);
+    const leadsMap = new Map();
+    leads.forEach(l => {
+      if (l._id) leadsMap.set(l._id.trim().toLowerCase(), l);
+    });
+
+    // 5. Aggregate managed accounts by salesperson
+    const customerAccounts = await Customer.aggregate([
+      {
+        $group: {
+          _id: { $trim: { input: { $ifNull: ['$salesPerson', 'Unassigned'] } } },
+          customerCount: { $sum: 1 }
+        }
+      }
+    ]);
+    const customersMap = new Map();
+    customerAccounts.forEach(c => {
+      if (c._id) customersMap.set(c._id.trim().toLowerCase(), c.customerCount);
+    });
+
+    // 6. Build per-salesperson metrics
+    const salespeople = employees.map(emp => {
+      const nameKey = (emp.fullName || '').trim().toLowerCase();
+      
+      const orderData = ordersMap.get(nameKey) || { totalAchieved: 0, orderCount: 0 };
+      const quoteData = quotationsMap.get(nameKey) || { quotationCount: 0, totalQuoted: 0 };
+      const leadData = leadsMap.get(nameKey) || { totalLeads: 0, wonLeads: 0 };
+      const clientCount = customersMap.get(nameKey) || 0;
+
+      // Commercial target in INR: Persisted on Employee record or role-based default
+      const target = emp.target ?? (emp.role?.toLowerCase().includes('senior') ? 2500000 : 1500000);
+      const achieved = orderData.totalAchieved || 0;
+      const pct = target > 0 ? Math.round((achieved / target) * 100) : 0;
+
+      return {
+        id: emp._id,
+        name: emp.fullName,
+        code: emp.employeeCode || `CT${String(emp._id).slice(-3)}`,
+        role: emp.role,
+        department: emp.department || 'Sales',
+        target,
+        achieved,
+        pct,
+        leads: leadData.totalLeads,
+        wonLeads: leadData.wonLeads,
+        quotations: quoteData.quotationCount,
+        quotationValue: quoteData.totalQuoted,
+        orders: orderData.orderCount,
+        customers: clientCount
+      };
+    });
+
+    // 7. Calculate overall summary
+    const totalTarget = salespeople.reduce((acc, s) => acc + s.target, 0);
+    const totalAchieved = salespeople.reduce((acc, s) => acc + s.achieved, 0);
+    const aboveTarget = salespeople.filter(s => s.achieved >= s.target).length;
+    const totalLeads = salespeople.reduce((acc, s) => acc + s.leads, 0);
+    const totalWonLeads = salespeople.reduce((acc, s) => acc + s.wonLeads, 0);
+    const totalQuotations = salespeople.reduce((acc, s) => acc + s.quotations, 0);
+
+    const teamComparison = salespeople.map(s => ({
+      name: s.name,
+      target: s.target / 100000,
+      achieved: Math.round((s.achieved / 100000) * 10) / 10,
+      leads: s.leads,
+      wonLeads: s.wonLeads,
+      quotations: s.quotations,
+      pct: s.pct
+    }));
+
+    res.json({
+      success: true,
+      data: {
+        summary: {
+          salespeopleCount: salespeople.length,
+          totalTarget,
+          totalAchieved,
+          aboveTarget,
+          totalLeads,
+          totalWonLeads,
+          totalQuotations
+        },
+        salespeople,
+        teamComparison
+      }
+    });
+  } catch (error) {
+    console.error('Error in getSalesPerformance:', error);
+    res.status(500).json({ success: false, message: 'Server error computing sales performance', error: error.message });
+  }
+};
+
+/**
+ * PATCH /api/sales/performance/target/:id
+ * Allows Admin and Manager to set or update a salesperson's target.
+ */
+export const updateSalespersonTarget = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { target } = req.body;
+
+    const numTarget = Number(target);
+    if (isNaN(numTarget) || numTarget < 0) {
+      return res.status(400).json({ success: false, message: 'Invalid target amount. Must be a valid positive number.' });
+    }
+
+    if (req.user) {
+      const r = (req.user.role || '').toLowerCase();
+      const isAllowed = r.includes('admin') || r.includes('director') || r.includes('manager');
+      if (!isAllowed) {
+        return res.status(403).json({ success: false, message: 'Permission denied: Only Admins and Managers can set sales targets.' });
+      }
+    }
+
+    let employee = null;
+    if (id && id.match(/^[0-9a-fA-F]{24}$/)) {
+      employee = await Employee.findByIdAndUpdate(
+        id,
+        { $set: { target: numTarget } },
+        { new: true }
+      );
+    }
+
+    if (!employee) {
+      employee = await Employee.findOneAndUpdate(
+        { $or: [{ employeeCode: id }, { fullName: id }] },
+        { $set: { target: numTarget } },
+        { new: true }
+      );
+    }
+
+    if (!employee) {
+      return res.status(404).json({ success: false, message: 'Salesperson not found' });
+    }
+
+    res.json({
+      success: true,
+      message: `Target for ${employee.fullName} updated to ₹${(numTarget >= 1e5 ? (numTarget / 1e5).toFixed(1) + ' Lakhs' : numTarget.toLocaleString('en-IN'))}`,
+      employee: {
+        id: employee._id,
+        name: employee.fullName,
+        target: employee.target
+      }
+    });
+  } catch (error) {
+    console.error('Error updating salesperson target:', error);
+    res.status(500).json({ success: false, message: 'Server error updating target', error: error.message });
+  }
+};
+
+

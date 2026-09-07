@@ -7,10 +7,13 @@ const protect = async (req, res, next) => {
     try {
       token = req.headers.authorization.split(' ')[1];
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      if (decoded.type !== 'access') {
+      if (decoded.type && decoded.type !== 'access') {
         throw new Error('Not an access token');
       }
-      req.user = await User.findById(decoded.id).select('-password');
+      const userId = decoded.id || decoded.userId || decoded._id;
+      if (userId) {
+        req.user = await User.findById(userId).select('-password');
+      }
       return next();
     } catch (error) {
       if (req.body?.employeeId || req.query?.employeeId || req.method === 'GET') {

@@ -2,16 +2,20 @@ import AuditLog from '../models/AuditLog.js';
 
 export const getAuditStats = async (req, res) => {
   try {
-    const [entries, critical, warnings] = await Promise.all([
+    const [entries, critical, warnings, logins, failedLogins] = await Promise.all([
       AuditLog.countDocuments(),
       AuditLog.countDocuments({ severity: 'CRITICAL' }),
-      AuditLog.countDocuments({ severity: 'WARNING' })
+      AuditLog.countDocuments({ severity: 'WARNING' }),
+      AuditLog.countDocuments({ action: 'LOGIN' }),
+      AuditLog.countDocuments({ action: 'LOGIN_FAILED' })
     ]);
 
     res.json({
       entries,
       critical,
       warnings,
+      logins,
+      failedLogins,
       retention: '7 years'
     });
   } catch (error) {
@@ -32,6 +36,7 @@ export const getAuditLogs = async (req, res) => {
       const regex = new RegExp(req.query.search, 'i');
       filter.$or = [
         { userName: regex },
+        { userRole: regex },
         { action: regex },
         { module: regex },
         { description: regex },
@@ -42,7 +47,13 @@ export const getAuditLogs = async (req, res) => {
 
     if (req.query.userId) filter.userId = req.query.userId;
     if (req.query.module) filter.module = req.query.module;
-    if (req.query.action) filter.action = req.query.action;
+    if (req.query.action) {
+      if (req.query.action.includes(',')) {
+        filter.action = { $in: req.query.action.split(',').map(s => s.trim()) };
+      } else {
+        filter.action = req.query.action;
+      }
+    }
     if (req.query.severity) filter.severity = req.query.severity;
     
     // Date ranges
