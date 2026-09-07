@@ -39,6 +39,7 @@ import warrantyRoutes from './routes/warrantyRoutes.js';
 import roleRoutes from './routes/roleRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
+import bankRoutes from './routes/bankRoutes.js';
 
 dotenv.config();
 connectDB();
@@ -86,6 +87,7 @@ app.use('/api/warranties', warrantyRoutes);
 app.use('/api/roles', roleRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/bank', bankRoutes);
 
 // ─── Health Check ────────────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
