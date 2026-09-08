@@ -28,6 +28,20 @@ const whatsappMessageSchema = new mongoose.Schema(
     },
     mediaType: {
       type: String,
+    },
+    senderName: {
+      type: String,
+    },
+    customerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Customer',
+    },
+    leadId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Lead',
+    },
+    rawPayload: {
+      type: mongoose.Schema.Types.Mixed,
     }
   },
   { timestamps: true }

@@ -1,19 +1,33 @@
 import express from 'express';
-import { handleWebhook, sendMessage, getConversations, getMessages } from '../controllers/whatsappController.js';
+import {
+  verifyWebhook,
+  handleWebhook,
+  sendMessage,
+  getConversations,
+  getMessages,
+  getWhatsAppQR,
+  getWhatsAppConfig,
+  simulateIncomingMessage
+} from '../controllers/whatsappController.js';
 
 const router = express.Router();
 
-// Webhook endpoint to receive WhatsApp messages/events
+// Meta Cloud API Webhook Verification (GET) & Event Handler (POST)
+router.get('/webhook', verifyWebhook);
 router.post('/webhook', handleWebhook);
 
-// Internal API endpoint to trigger a WhatsApp message
+// Outbound Messaging & Chat History
 router.post('/send-message', sendMessage);
-
-// Internal API to fetch conversations
 router.get('/conversations', getConversations);
-
-// Internal API to fetch messages for a specific phone number
 router.get('/messages/:phone', getMessages);
 
-export default router;
+// Scan QR Code & Click-to-Chat Link Generation
+router.get('/qr', getWhatsAppQR);
 
+// Webhook & Integration Configuration status
+router.get('/config', getWhatsAppConfig);
+
+// Simulate incoming message (for development/testing and demo)
+router.post('/simulate-incoming', simulateIncomingMessage);
+
+export default router;
