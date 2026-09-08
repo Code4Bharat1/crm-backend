@@ -10,6 +10,8 @@ import Product from '../models/Product.js';
 import Employee from '../models/Employee.js';
 import AuditLog from '../models/AuditLog.js';
 import Customer from '../models/Customer.js';
+import FollowUp from '../models/FollowUp.js';
+import { generateFollowUps } from '../utils/followUpEngine.js';
 
 const OPEN_QUOTATION_STATUSES = ['Draft', 'Sent', 'Viewed'];
 const PENDING_DELIVERY_STATUSES = ['Confirmed', 'In Progress', 'Partially Delivered'];
@@ -23,6 +25,8 @@ const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 export const getDashboardKpis = async (req, res) => {
   try {
     const since90d = new Date(Date.now() - NINETY_DAYS_MS);
+    const startOfToday = new Date(new Date().setHours(0, 0, 0, 0));
+    await generateFollowUps();
 
     const [
       totalLeads,
@@ -107,11 +111,8 @@ export const getDashboardKpis = async (req, res) => {
 
       Product.countDocuments({ $expr: { $lt: ['$stock', '$minStock'] } }),
       Product.countDocuments(),
-      Lead.countDocuments({ stage: { $in: ['New', 'Contacted', 'Potential', 'Hot', 'Quotation Sent', 'Negotiation'] } }),
-      Lead.countDocuments({ 
-        stage: { $in: ['Contacted', 'Potential', 'Hot'] },
-        updatedAt: { $lt: new Date(Date.now() - 7 * 86400000) }
-      })
+      FollowUp.countDocuments({ status: 'Pending' }),
+      FollowUp.countDocuments({ status: 'Pending', dueDate: { $lt: startOfToday } }),
     ]);
 
     const q = quotationAgg[0] || { count: 0, value: 0 };
@@ -160,6 +161,8 @@ export const getDashboardKpis = async (req, res) => {
 export const getDashboardOverview = async (req, res) => {
   try {
     const since90d = new Date(Date.now() - NINETY_DAYS_MS);
+    const startOfToday = new Date(new Date().setHours(0, 0, 0, 0));
+    await generateFollowUps();
 
     // 1. KPI aggregations
     const [
@@ -248,11 +251,8 @@ export const getDashboardOverview = async (req, res) => {
 
       Product.countDocuments({ $expr: { $lt: ['$stock', '$minStock'] } }),
       Product.countDocuments(),
-      Lead.countDocuments({ stage: { $in: ['New', 'Contacted', 'Potential', 'Hot', 'Quotation Sent', 'Negotiation'] } }),
-      Lead.countDocuments({ 
-        stage: { $in: ['Contacted', 'Potential', 'Hot'] },
-        updatedAt: { $lt: new Date(Date.now() - 7 * 86400000) }
-      }),
+      FollowUp.countDocuments({ status: 'Pending' }),
+      FollowUp.countDocuments({ status: 'Pending', dueDate: { $lt: startOfToday } }),
       ProformaInvoice.countDocuments(),
       DeliveryNote.countDocuments(),
       SalesInvoice.countDocuments()
@@ -430,18 +430,16 @@ export const getDashboardOverview = async (req, res) => {
       status: i.status || 'Overdue'
     }));
 
-    // 9. Due Follow-ups list (real data)
-    const rawFollowUps = await Lead.find({
-      stage: { $nin: ['Won', 'Lost'] }
-    }).sort({ updatedAt: -1 }).limit(6).lean();
+    // 9. Due Follow-ups list -- real rows from the Follow-up Engine (generateFollowUps already ran above)
+    const rawFollowUps = await FollowUp.find({ status: 'Pending' }).sort({ dueDate: 1 }).limit(6).lean();
 
     const dueFollowUps = rawFollowUps.map(f => ({
-      id: f.id || `LD-${String(f._id).slice(-4)}`,
-      customerName: f.customerName || 'Lead Account',
-      type: f.source || 'Inquiry',
-      owner: f.salesperson || 'Sales Team',
-      dueDate: f.lastRepliedAt || f.date || f.updatedAt,
-      status: f.stage || 'New'
+      id: String(f._id),
+      customerName: f.customerName,
+      type: f.type,
+      owner: f.owner,
+      dueDate: f.dueDate,
+      status: f.dueDate < startOfToday ? 'Overdue' : 'Pending'
     }));
 
     // 10. Open Service Requests (real data)
