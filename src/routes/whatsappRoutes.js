@@ -7,7 +7,10 @@ import {
   getMessages,
   getWhatsAppQR,
   getWhatsAppConfig,
-  simulateIncomingMessage
+  simulateIncomingMessage,
+  getWebClientStatus,
+  startWebClient,
+  disconnectWebClient
 } from '../controllers/whatsappController.js';
 
 const router = express.Router();
@@ -30,4 +33,10 @@ router.get('/config', getWhatsAppConfig);
 // Simulate incoming message (for development/testing and demo)
 router.post('/simulate-incoming', simulateIncomingMessage);
 
+// WhatsApp-Web.js Session Management Routes
+router.get('/web-client/status', getWebClientStatus);
+router.post('/web-client/start', startWebClient);
+router.post('/web-client/disconnect', disconnectWebClient);
+
 export default router;
+

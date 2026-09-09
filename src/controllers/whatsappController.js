@@ -2,6 +2,12 @@ import Customer from '../models/Customer.js';
 import Lead from '../models/Lead.js';
 import WhatsAppMessage from '../models/whatsappMessageModel.js';
 import { sendWhatsAppMessage, generateWhatsAppQR } from '../utils/whatsappService.js';
+import {
+    getWebClientStatus as fetchWebStatus,
+    initWhatsAppWeb,
+    disconnectWebClient as terminateWebClient
+} from '../services/whatsappWebService.js';
+
 
 /**
  * Helper to match Customer or Lead by phone number in MongoDB
@@ -193,7 +199,15 @@ export const sendMessage = async (req, res) => {
         }
 
         let result;
-        const bodyToSave = template_name ? `[Template: ${template_name}]` : message_body;
+        const TEMPLATE_DESCRIPTIONS = {
+            'quotation_shared': 'Dear Customer, we have shared your quotation. Kindly review and let us know if you have any questions.',
+            'payment_reminder': 'Dear Customer, this is a gentle payment reminder regarding your pending invoice. Please share transaction details if settled.',
+            'engineer_visit': 'Dear Customer, our service engineer visit has been scheduled. Our team will contact you shortly.',
+            'dispatch_details': 'Dear Customer, your order has been dispatched. Dispatch and tracking details will follow.',
+            'warranty_renewal': 'Dear Customer, your warranty / AMC is due for renewal. Please contact our support team.'
+        };
+        const templateDefaultText = template_name ? (TEMPLATE_DESCRIPTIONS[template_name] || `[Template: ${template_name}]`) : '';
+        const bodyToSave = message_body || templateDefaultText;
 
         if (message_body && !template_name) {
             const outboundPayload = {
@@ -210,13 +224,17 @@ export const sendMessage = async (req, res) => {
                 phone_number,
                 template_name,
                 template_language,
-                message_body: 'template_message',
+                message_body: bodyToSave,
+                message: bodyToSave,
+                body: bodyToSave,
+                text: bodyToSave,
                 ...dynamicFields
             };
             result = await sendWhatsAppMessage(outboundTemplatePayload);
         } else {
             return res.status(400).json({ error: 'Either template_name or message_body is required' });
         }
+
 
         const { customer, lead } = await findCustomerOrLeadByPhone(phone_number);
 
@@ -422,3 +440,55 @@ export const simulateIncomingMessage = async (req, res) => {
         res.status(500).json({ success: false, error: error.message });
     }
 };
+
+/**
+ * GET /api/whatsapp/web-client/status
+ * Get connection status and live QR code of whatsapp-web.js client
+ */
+export const getWebClientStatus = (req, res) => {
+    try {
+        const statusData = fetchWebStatus();
+        res.json({
+            success: true,
+            data: statusData
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+/**
+ * POST /api/whatsapp/web-client/start
+ * Trigger initialization of whatsapp-web.js client (emits QR code)
+ */
+export const startWebClient = (req, res) => {
+    try {
+        initWhatsAppWeb();
+        const statusData = fetchWebStatus();
+        res.json({
+            success: true,
+            message: 'WhatsApp Web client initialization initiated. Please retrieve QR code.',
+            data: statusData
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+
+/**
+ * POST /api/whatsapp/web-client/disconnect
+ * Log out and tear down active whatsapp-web.js session
+ */
+export const disconnectWebClient = async (req, res) => {
+    try {
+        const result = await terminateWebClient();
+        res.json({
+            success: true,
+            message: 'WhatsApp Web client disconnected successfully.',
+            data: result
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+};
+

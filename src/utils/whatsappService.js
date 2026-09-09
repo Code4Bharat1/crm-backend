@@ -1,16 +1,36 @@
 import axios from 'axios';
+import { isWebClientConnected, sendWebMessage } from '../services/whatsappWebService.js';
 
 /**
- * Send a WhatsApp message using Meta Cloud API or Nexcore Alliance Gateway
+ * Send a WhatsApp message using WhatsApp Web Client, Meta Cloud API, or Nexcore Alliance Gateway
  * @param {Object} messageData - Payload containing phone_number, message_body / text, template_name, etc.
  * @returns {Promise<Object>} API response data
  */
 export const sendWhatsAppMessage = async (messageData) => {
     const cleanPhone = String(messageData.phone_number || '').replace(/[^\d]/g, '');
 
+    // 0. Check if WhatsApp Web Client (whatsapp-web.js) is active and connected
+    if (isWebClientConnected()) {
+        const text = messageData.message_body || messageData.message || messageData.body || messageData.text || '';
+        try {
+            console.log('📱 Sending message via WhatsApp Web Client (whatsapp-web.js) to:', cleanPhone);
+            const webResult = await sendWebMessage(cleanPhone, text);
+            return {
+                provider: 'whatsapp_web_js',
+                ...webResult
+            };
+        } catch (webErr) {
+            console.error('⚠️ WhatsApp Web Client send error:', webErr.message);
+            // Do not fall back to third-party vendor gateway when user is intentionally using WhatsApp Web!
+            throw webErr;
+        }
+    }
+
+
     // 1. Check for official Meta Cloud API configuration
     const META_TOKEN = process.env.WHATSAPP_CLOUD_API_TOKEN || process.env.META_WHATSAPP_TOKEN;
     const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
+
 
     if (META_TOKEN && PHONE_NUMBER_ID) {
         try {
@@ -81,9 +101,12 @@ export const sendWhatsAppMessage = async (messageData) => {
                 ...response.data
             };
         } catch (error) {
-            console.error('Nexcore Gateway send error:', error.response?.data || error.message);
-            throw error;
+            const errData = error.response?.data;
+            const errMsg = errData?.message || error.message;
+            console.error('Nexcore Gateway send error:', errData || error.message);
+            throw new Error(`WhatsApp Gateway Error (${errMsg}). If you have scanned your phone, please wait a moment for WhatsApp Web to finish syncing.`);
         }
+
     }
 
     // 3. Fallback: Log simulated delivery if in test mode
