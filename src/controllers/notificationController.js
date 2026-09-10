@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Notification from '../models/Notification.js';
 
 // GET /api/notifications
@@ -73,9 +74,16 @@ export const getNotifications = async (req, res) => {
 export const markAsRead = async (req, res) => {
   try {
     const { id } = req.params;
-    const notification = await Notification.findByIdAndUpdate(
-      id,
-      { read: true },
+    let query = {};
+    if (mongoose.isValidObjectId(id)) {
+      query = { _id: id };
+    } else {
+      query = { $or: [{ id: id }, { _id: id }] };
+    }
+
+    const notification = await Notification.findOneAndUpdate(
+      query,
+      { $set: { read: true } },
       { new: true }
     );
 
@@ -93,7 +101,7 @@ export const markAsRead = async (req, res) => {
 // PATCH /api/notifications/mark-all-read
 export const markAllAsRead = async (req, res) => {
   try {
-    const { recipient } = req.body;
+    const { recipient } = req.body || {};
     const user = req.user;
     const roleStr = (user?.role || '').toLowerCase().trim();
     const isAdmin = roleStr === 'admin' || roleStr === 'director' || roleStr === 'admin manager';
@@ -106,10 +114,13 @@ export const markAllAsRead = async (req, res) => {
         { recipient: 'all' }
       ];
     } else if (recipient) {
-      query.recipient = recipient;
+      query.$or = [
+        { recipient: { $regex: `^${recipient.trim()}$`, $options: 'i' } },
+        { recipient: 'all' }
+      ];
     }
 
-    await Notification.updateMany(query, { read: true });
+    await Notification.updateMany(query, { $set: { read: true } });
     res.json({ success: true, message: 'All notifications marked as read' });
   } catch (error) {
     console.error('Error marking all notifications as read:', error);

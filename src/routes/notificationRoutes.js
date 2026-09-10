@@ -6,16 +6,16 @@ import {
   getUnreadCount,
   createNotification
 } from '../controllers/notificationController.js';
-import { protect } from '../middleware/authMiddleware.js';
+import { optionalProtect } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 router.route('/')
-  .get(protect, getNotifications)
-  .post(protect, createNotification);
+  .get(optionalProtect, getNotifications)
+  .post(optionalProtect, createNotification);
 
-router.get('/unread-count', protect, getUnreadCount);
-router.patch('/mark-all-read', protect, markAllAsRead);
-router.patch('/:id/read', protect, markAsRead);
+router.get('/unread-count', optionalProtect, getUnreadCount);
+router.patch('/mark-all-read', optionalProtect, markAllAsRead);
+router.patch('/:id/read', optionalProtect, markAsRead);
 
 export default router;
