@@ -283,7 +283,7 @@ export const getAttendanceStats = async (req, res) => {
         const emp = await Employee.findOne({ email: user.email });
         if (emp) userEmpId = emp._id;
       }
-      const myRecords = await Attendance.find({ employeeId: userEmpId });
+      const myRecords = await Attendance.find({ employeeId: userEmpId }).sort({ date: -1 });
       const todayStr = getISTDateString();
       const todayRec = myRecords.find(r => r.date === todayStr);
       const myPresent = myRecords.filter(r => r.status === 'Present' || r.status === 'Half Day').length;
@@ -291,6 +291,14 @@ export const getAttendanceStats = async (req, res) => {
       const myOT = myRecords.reduce((sum, r) => sum + (r.overtimeHours || 0), 0);
 
       const now = new Date();
+      let todayStatus = 'NOT_PUNCHED_IN';
+      if (todayRec) {
+        if (todayRec.checkOut) todayStatus = 'COMPLETED';
+        else if (todayRec.checkIn) todayStatus = 'WORKING';
+        else if (todayRec.status === 'Leave') todayStatus = 'LEAVE';
+        else todayStatus = todayRec.status;
+      }
+
       return res.json({
         success: true,
         data: {
@@ -305,20 +313,75 @@ export const getAttendanceStats = async (req, res) => {
           attendanceRateToday: myRecords.length > 0 ? Math.round((myPresent / myRecords.length) * 100) : 100,
           totalOvertimeHours: Math.round(myOT * 10) / 10,
           personalPresentDays: myPresent,
-          personalLeaveDays: myLeave
+          personalLeaveDays: myLeave,
+          todayStatus,
+          todayRecord: todayRec || null,
+          recentRecords: myRecords.slice(0, 10)
         }
       });
     }
 
     const todayStr = getISTDateString();
-    const totalEmployees = await Employee.countDocuments({ isActive: true });
-    
-    // Today's attendance
-    const todayRecords = await Attendance.find({ date: todayStr });
-    const presentToday = todayRecords.filter(r => r.status === 'Present' || r.status === 'Half Day').length;
-    const leaveToday = todayRecords.filter(r => r.status === 'Leave').length;
+    const activeEmployees = await Employee.find({ isActive: true })
+      .select('fullName employeeCode role department email phone')
+      .sort({ fullName: 1 });
+    const totalEmployees = activeEmployees.length;
 
-    // All active attendance records
+    // Today's attendance records
+    const todayRecords = await Attendance.find({ date: todayStr });
+    const todayMap = new Map();
+    todayRecords.forEach(r => {
+      const eid = r.employeeId?.toString();
+      if (eid) todayMap.set(eid, r);
+    });
+
+    let workingNow = 0;
+    let completedToday = 0;
+    let leaveToday = 0;
+
+    const todayRoster = activeEmployees.map(emp => {
+      const rec = todayMap.get(emp._id.toString());
+      let status = 'NOT_PUNCHED_IN';
+      if (rec) {
+        if (rec.checkOut) {
+          status = 'COMPLETED';
+          completedToday += 1;
+        } else if (rec.checkIn) {
+          status = 'WORKING';
+          workingNow += 1;
+        } else if (rec.status === 'Leave') {
+          status = 'LEAVE';
+          leaveToday += 1;
+        } else if (rec.status === 'Present' || rec.status === 'Half Day') {
+          status = 'COMPLETED';
+          completedToday += 1;
+        } else {
+          status = rec.status;
+        }
+      }
+
+      return {
+        employeeId: emp._id,
+        fullName: emp.fullName,
+        employeeCode: emp.employeeCode,
+        role: emp.role,
+        department: emp.department || 'General',
+        email: emp.email,
+        status,
+        checkIn: rec?.checkIn || null,
+        checkOut: rec?.checkOut || null,
+        workedMinutes: rec?.workedMinutes || 0,
+        overtimeHours: rec?.overtimeHours || 0,
+        remarks: rec?.remarks || '',
+        source: rec?.source || 'Web'
+      };
+    });
+
+    const presentToday = workingNow + completedToday;
+    const absentToday = Math.max(0, totalEmployees - (presentToday + leaveToday));
+    const attendanceRateToday = totalEmployees > 0 ? Math.round((presentToday / totalEmployees) * 100) : 0;
+
+    // All active attendance records for total overtime
     const allRecords = await Attendance.find({ employeeId: { $ne: null } });
     const totalOvertime = allRecords.reduce((sum, r) => sum + (r.overtimeHours || 0), 0);
 
@@ -328,16 +391,21 @@ export const getAttendanceStats = async (req, res) => {
     res.json({
       success: true,
       data: {
+        isEmployeeView: false,
         attendanceMode: "Biometric & ESS",
         apiStatus: "Active & Synchronised",
         lastSynchronization: syncTimeStr,
         recordsSynchronized: allRecords.length,
         failedRecords: 0,
         totalEmployees,
-        presentToday: presentToday || (totalEmployees > 1 ? totalEmployees - 1 : totalEmployees),
-        leaveToday: leaveToday || (totalEmployees > 1 ? 1 : 0),
-        attendanceRateToday: totalEmployees > 0 ? Math.round(((presentToday || (totalEmployees > 1 ? totalEmployees - 1 : totalEmployees)) / totalEmployees) * 100) : 0,
-        totalOvertimeHours: Math.round(totalOvertime * 10) / 10
+        presentToday,
+        workingNow,
+        completedToday,
+        absentToday,
+        leaveToday,
+        attendanceRateToday,
+        totalOvertimeHours: Math.round(totalOvertime * 10) / 10,
+        todayRoster
       }
     });
   } catch (error) {
