@@ -6,9 +6,17 @@ import {
   updateProduct,
   deleteProduct,
   adjustStock,
+  getCategories,
+  createCategory,
+  deleteCategory,
 } from '../controllers/productController.js';
 
 const router = express.Router();
+
+// Categories routes (must be before /:id)
+router.get('/categories', getCategories);
+router.post('/categories', createCategory);
+router.delete('/categories/:id', deleteCategory);
 
 router.get('/', getProducts);
 router.get('/:id', getProductById);

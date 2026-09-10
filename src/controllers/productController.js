@@ -1,4 +1,16 @@
 import Product from '../models/Product.js';
+import Category from '../models/Category.js';
+
+const DEFAULT_CATEGORIES = [
+  'Automation',
+  'Switchgear',
+  'Motors',
+  'Sensors',
+  'Cables',
+  'Drives',
+  'Pneumatics',
+  'General',
+];
 
 export const getProducts = async (req, res) => {
   try {
@@ -98,5 +110,93 @@ export const adjustStock = async (req, res) => {
     res.json({ product: doc, message: `Stock updated to ${doc.stock}`, reason });
   } catch (error) {
     res.status(400).json({ message: 'Error adjusting stock', error: error.message });
+  }
+};
+
+// GET /api/products/categories
+export const getCategories = async (req, res) => {
+  try {
+    const dbCategories = await Category.find().sort({ name: 1 });
+    const productCategories = await Product.distinct('category');
+
+    const categoryMap = new Map();
+
+    // 1. Add default categories
+    DEFAULT_CATEGORIES.forEach((name) => {
+      categoryMap.set(name.toLowerCase(), { name, isDefault: true, description: '' });
+    });
+
+    // 2. Add DB categories
+    dbCategories.forEach((cat) => {
+      categoryMap.set(cat.name.toLowerCase(), {
+        _id: cat._id,
+        name: cat.name,
+        description: cat.description || '',
+        isDefault: cat.isDefault || false,
+      });
+    });
+
+    // 3. Add any distinct categories currently on products
+    productCategories.filter(Boolean).forEach((name) => {
+      if (!categoryMap.has(name.toLowerCase())) {
+        categoryMap.set(name.toLowerCase(), { name, isDefault: false, description: '' });
+      }
+    });
+
+    res.json(Array.from(categoryMap.values()));
+  } catch (error) {
+    res.status(500).json({ message: 'Error fetching categories', error: error.message });
+  }
+};
+
+// POST /api/products/categories
+export const createCategory = async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ message: 'Category name is required' });
+    }
+
+    const trimmedName = name.trim();
+
+    // Check if it already exists in DB
+    const existing = await Category.findOne({ name: { $regex: new RegExp(`^${trimmedName}$`, 'i') } });
+    if (existing) {
+      return res.status(400).json({ message: `Category "${trimmedName}" already exists` });
+    }
+
+    const isDefault = DEFAULT_CATEGORIES.some(c => c.toLowerCase() === trimmedName.toLowerCase());
+    if (isDefault) {
+      return res.status(400).json({ message: `Category "${trimmedName}" is already a standard category` });
+    }
+
+    const newCat = new Category({
+      name: trimmedName,
+      description: description?.trim() || '',
+      isDefault: false,
+    });
+    await newCat.save();
+
+    res.status(201).json(newCat);
+  } catch (error) {
+    res.status(400).json({ message: 'Error creating category', error: error.message });
+  }
+};
+
+// DELETE /api/products/categories/:id
+export const deleteCategory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const cat = await Category.findById(id).catch(() => null)
+      || await Category.findOne({ name: { $regex: new RegExp(`^${id}$`, 'i') } });
+
+    if (!cat) {
+      return res.status(404).json({ message: 'Category not found' });
+    }
+
+    await Category.findByIdAndDelete(cat._id);
+    res.json({ message: `Category "${cat.name}" deleted successfully` });
+  } catch (error) {
+    res.status(500).json({ message: 'Error deleting category', error: error.message });
   }
 };
