@@ -1,7 +1,32 @@
 import Quotation from '../models/Quotation.js';
 import ProformaInvoice from '../models/ProformaInvoice.js';
 import SalesOrder from '../models/SalesOrder.js';
+import Lead from '../models/Lead.js';
 import { deductInventoryStock } from './salesOrderController.js';
+
+// Sync lead stage to "Quotation Sent" when quotation is created/sent
+const syncLeadToQuotationSent = async (customerName, quotationNo) => {
+  if (!customerName) return;
+  try {
+    const raw = String(customerName).trim();
+    const clean = raw.replace(/^["']|["']$/g, '').trim();
+    const query = {
+      $or: [
+        { customerName: raw },
+        { customerName: clean },
+        { customerName: `"${clean}"` },
+        { customerName: new RegExp(`^"?${clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"?$`, 'i') }
+      ]
+    };
+    await Lead.updateMany(query, {
+      $set: {
+        stage: 'Quotation Sent'
+      }
+    });
+  } catch (err) {
+    console.error('Failed to sync lead stage to Quotation Sent:', err);
+  }
+};
 
 // Generate next quotation number  e.g. QT-2026-001
 const generateQuotationNo = async () => {
@@ -43,9 +68,20 @@ export const getQuotationById = async (req, res) => {
 
 export const createQuotation = async (req, res) => {
   try {
-    const quotationNo = req.body.quotationNo || await generateQuotationNo();
-    const quotation = new Quotation({ ...req.body, quotationNo });
+    const body = { ...req.body };
+    if (body.customer) {
+      body.customer = { ...body.customer };
+      if (typeof body.customer.name === 'string') {
+        body.customer.name = body.customer.name.trim().replace(/^["'\s]+|["'\s]+$/g, '').trim();
+      }
+      if (typeof body.customer.contactPerson === 'string') {
+        body.customer.contactPerson = body.customer.contactPerson.trim().replace(/^["'\s]+|["'\s]+$/g, '').trim();
+      }
+    }
+    const quotationNo = body.quotationNo || await generateQuotationNo();
+    const quotation = new Quotation({ ...body, quotationNo });
     await quotation.save();
+    await syncLeadToQuotationSent(quotation.customer?.name, quotation.quotationNo);
     res.status(201).json(quotation);
   } catch (error) {
     res.status(400).json({ message: 'Error creating quotation', error: error.message });
@@ -57,8 +93,19 @@ export const updateQuotation = async (req, res) => {
     const doc = await Quotation.findOne({ quotationNo: req.params.id })
       || await Quotation.findById(req.params.id).catch(() => null);
     if (!doc) return res.status(404).json({ message: 'Quotation not found' });
-    Object.assign(doc, req.body);
+    const body = { ...req.body };
+    if (body.customer) {
+      body.customer = { ...body.customer };
+      if (typeof body.customer.name === 'string') {
+        body.customer.name = body.customer.name.trim().replace(/^["'\s]+|["'\s]+$/g, '').trim();
+      }
+      if (typeof body.customer.contactPerson === 'string') {
+        body.customer.contactPerson = body.customer.contactPerson.trim().replace(/^["'\s]+|["'\s]+$/g, '').trim();
+      }
+    }
+    Object.assign(doc, body);
     await doc.save();
+    await syncLeadToQuotationSent(doc.customer?.name, doc.quotationNo);
     res.json(doc);
   } catch (error) {
     res.status(400).json({ message: 'Error updating quotation', error: error.message });
