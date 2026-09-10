@@ -4,7 +4,7 @@ import RefreshToken from '../models/RefreshToken.js';
 import Role from '../models/Role.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { getPermissionsForRole } from '../config/permissions.js';
+import { getPermissionsForRole, ALL_SIDEBAR_MODULE_KEYS, isAdminRole } from '../config/permissions.js';
 import { findMatchingRoleInList } from '../utils/roleMatcher.js';
 import { applyAssignmentOverrides } from '../utils/assignmentAccess.js';
 import { createAuditLog } from '../services/auditLogService.js';
@@ -12,6 +12,9 @@ import { createAuditLog } from '../services/auditLogService.js';
 const resolveUserPermissions = async (roleName) => {
   let permissions = getPermissionsForRole(roleName);
   if (!roleName) return permissions;
+  if (isAdminRole(roleName)) {
+    return { view: true, create: true, edit: true, delete: true, approve: true, export: true, financial: true, admin: true };
+  }
   try {
     const dbRole = await Role.findOne({
       name: { $regex: new RegExp(`^${roleName.trim()}$`, 'i') }
@@ -26,17 +29,26 @@ const resolveUserPermissions = async (roleName) => {
 };
 
 /**
- * Looks up the granular per-sidebar-module permission map for a user's role
- * (as configured in Users & Roles), fuzzy-matched against the role name so
- * "sales" / "Sales" / "Salesperson" all resolve to the same Role document.
- * Returns null when no matching role has been configured yet, so callers can
- * fall back to showing everything rather than locking the user out.
+ * Looks up the granular per-sidebar-module permission map for a user's role.
+ * - If admin, returns ALL 34 sidebar modules set to true.
+ * - If non-admin, strictly fetches from the Role collection in DB.
+ * - Defaults to { dashboard: true } if no role configured. Never returns null or full access!
  */
 const getSidebarPermissionsForRole = async (roleName) => {
-  if (!roleName) return null;
+  if (!roleName) return { dashboard: true };
+  if (isAdminRole(roleName)) {
+    const adminPermissions = {};
+    ALL_SIDEBAR_MODULE_KEYS.forEach((key) => {
+      adminPermissions[key] = true;
+    });
+    return adminPermissions;
+  }
   const allRoles = await Role.find();
   const match = findMatchingRoleInList(roleName, allRoles);
-  return match ? match.permissions : null;
+  if (match && match.permissions) {
+    return { ...match.permissions, dashboard: true };
+  }
+  return { dashboard: true };
 };
 
 const generateToken = (id, type = 'access') => {
@@ -303,4 +315,141 @@ const changePassword = async (req, res) => {
   }
 };
 
-export { registerUser, loginUser, logoutUser, changePassword, refreshAccessToken, logoutAll };
+// @desc    Get current user profile & latest role permissions
+// @route   GET /api/auth/me
+// @access  Protected
+const getCurrentUser = async (req, res) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'User not authenticated' });
+    }
+    const permissions = await resolveUserPermissions(user.role);
+    let sidebarPermissions = await getSidebarPermissionsForRole(user.role);
+    if (user.employeeId) {
+      sidebarPermissions = await applyAssignmentOverrides(sidebarPermissions, user.employeeId);
+    }
+    res.json({
+      success: true,
+      data: {
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          employeeId: user.employeeId
+        },
+        permissions,
+        sidebarPermissions
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Get all registered users for user/role management
+// @route   GET /api/auth/users
+// @access  Protected (Admin only)
+const getAllUsers = async (req, res) => {
+  try {
+    const users = await User.find({}, '-password').sort({ createdAt: -1 });
+    res.json({
+      success: true,
+      count: users.length,
+      data: users
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Update a user's role
+// @route   PUT /api/auth/users/:id/role
+// @access  Protected (Admin only)
+const updateUserRole = async (req, res) => {
+  try {
+    const { role } = req.body;
+    if (!role) {
+      return res.status(400).json({ success: false, message: 'Role is required' });
+    }
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    user.role = role.trim();
+    await user.save();
+
+    await createAuditLog({
+      req,
+      action: 'ROLE_ASSIGNMENT',
+      module: 'USERS_ROLES',
+      description: `Role updated for user ${user.email} to ${user.role}`,
+      severity: 'WARNING',
+      status: 'SUCCESS'
+    });
+
+    res.json({
+      success: true,
+      message: `Role for ${user.name} successfully changed to ${user.role}`,
+      data: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Create a new system user account
+// @route   POST /api/auth/users
+// @access  Protected (Admin only)
+const createAdminUser = async (req, res) => {
+  try {
+    const { name, email, password, role } = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({ success: false, message: 'Name, email, and password are required' });
+    }
+    const userExists = await User.findOne({ email });
+    if (userExists) {
+      return res.status(400).json({ success: false, message: 'User with this email already exists' });
+    }
+    const user = await User.create({
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      password,
+      role: role ? role.trim() : 'Sales'
+    });
+
+    res.status(201).json({
+      success: true,
+      message: `User ${user.name} created successfully`,
+      data: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export {
+  registerUser,
+  loginUser,
+  logoutUser,
+  changePassword,
+  refreshAccessToken,
+  logoutAll,
+  getCurrentUser,
+  getAllUsers,
+  updateUserRole,
+  createAdminUser,
+  getSidebarPermissionsForRole,
+  resolveUserPermissions
+};

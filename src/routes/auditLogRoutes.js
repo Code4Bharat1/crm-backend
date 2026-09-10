@@ -17,8 +17,8 @@ const auditAccessCheck = async (req, res, next) => {
   const roleName = req.user.role || '';
   const normalized = roleName.trim().toLowerCase();
 
-  // 1. Super admin roles (case-insensitive)
-  if (['admin', 'director', 'admin manager'].includes(normalized)) {
+  // 1. Super admin roles (strictly admin / superadmin)
+  if (['admin', 'superadmin', 'super admin'].includes(normalized)) {
     return next();
   }
 
