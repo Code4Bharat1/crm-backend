@@ -8,6 +8,7 @@ import { getPermissionsForRole, ALL_SIDEBAR_MODULE_KEYS, isAdminRole } from '../
 import { findMatchingRoleInList } from '../utils/roleMatcher.js';
 import { applyAssignmentOverrides } from '../utils/assignmentAccess.js';
 import { createAuditLog } from '../services/auditLogService.js';
+import { sendPasswordResetEmail } from '../utils/sendPasswordResetEmail.js';
 
 const resolveUserPermissions = async (roleName) => {
   let permissions = getPermissionsForRole(roleName);
@@ -287,6 +288,173 @@ const logoutAll = async (req, res) => {
   res.json({ success: true, message: 'Logged out from all devices successfully' });
 };
 
+// @desc    Request password reset email with secure token
+// @route   POST /api/auth/forgot-password
+// @access  Public
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || !email.trim()) {
+      return res.status(400).json({ success: false, message: 'Please provide your work email address' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const user = await User.findOne({ email: normalizedEmail });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'No registered user found with that email address. Please check your spelling or contact your administrator.'
+      });
+    }
+
+    // Generate raw 32-byte cryptographic token
+    const resetToken = crypto.randomBytes(32).toString('hex');
+
+    // Hash token using SHA-256 for secure DB persistence
+    const tokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
+
+    // Set token expiry to 60 minutes from now
+    user.resetPasswordToken = tokenHash;
+    user.resetPasswordExpire = new Date(Date.now() + 60 * 60 * 1000);
+    await user.save();
+
+    // Dispatch email
+    const emailResult = await sendPasswordResetEmail({
+      user,
+      resetToken,
+      req,
+    });
+
+    if (!emailResult.success) {
+      user.resetPasswordToken = undefined;
+      user.resetPasswordExpire = undefined;
+      await user.save();
+      return res.status(500).json({
+        success: false,
+        message: `Could not send reset email: ${emailResult.error || 'SMTP delivery failed'}. Please contact support.`
+      });
+    }
+
+    await createAuditLog({
+      req,
+      action: 'PASSWORD_RESET_REQUESTED',
+      module: 'AUTHENTICATION',
+      description: `Password reset link requested and emailed to ${user.email}`,
+      severity: 'INFO',
+      status: 'SUCCESS',
+      metadata: { email: user.email }
+    });
+
+    res.json({
+      success: true,
+      message: `A password reset link has been dispatched to ${user.email}. Please check your inbox (and spam folder).`
+    });
+  } catch (error) {
+    console.error('forgotPassword error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Verify if a reset token is valid
+// @route   GET /api/auth/verify-reset-token
+// @access  Public
+const verifyResetToken = async (req, res) => {
+  try {
+    const { token, email } = req.query;
+    if (!token) {
+      return res.status(400).json({ success: false, message: 'Reset token is required' });
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const query = {
+      resetPasswordToken: tokenHash,
+      resetPasswordExpire: { $gt: new Date() }
+    };
+    if (email) {
+      query.email = email.trim().toLowerCase();
+    }
+
+    const user = await User.findOne(query);
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password reset link is invalid or has expired. Please request a new link.'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Token is valid',
+      data: { email: user.email, name: user.name }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Reset password using email token
+// @route   POST /api/auth/reset-password
+// @access  Public
+const resetPassword = async (req, res) => {
+  try {
+    const { token, email, newPassword } = req.body;
+    if (!token || !newPassword) {
+      return res.status(400).json({ success: false, message: 'Reset token and new password are required' });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long' });
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const query = {
+      resetPasswordToken: tokenHash,
+      resetPasswordExpire: { $gt: new Date() }
+    };
+    if (email) {
+      query.email = email.trim().toLowerCase();
+    }
+
+    const user = await User.findOne(query);
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password reset link is invalid or has expired. Please request a new link.'
+      });
+    }
+
+    user.password = newPassword;
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+    await user.save();
+
+    // Revoke any existing active refresh tokens so existing sessions must re-login
+    await RefreshToken.deleteMany({ userId: user._id });
+
+    await createAuditLog({
+      req,
+      action: 'PASSWORD_RESET_COMPLETED',
+      module: 'AUTHENTICATION',
+      description: `Password successfully reset for ${user.email}`,
+      severity: 'INFO',
+      status: 'SUCCESS',
+      metadata: { email: user.email }
+    });
+
+    res.json({
+      success: true,
+      message: 'Password has been successfully reset! You can now log in with your new password.'
+    });
+  } catch (error) {
+    console.error('resetPassword error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Change user password (with current password verification)
+// @route   POST /api/auth/change-password
+// @access  Public / Protected
 const changePassword = async (req, res) => {
   try {
     const { email, currentPassword, newPassword } = req.body;
@@ -294,17 +462,39 @@ const changePassword = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Email and new password are required' });
     }
 
-    const user = await User.findOne({ email });
+    if (newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: 'New password must be at least 6 characters long' });
+    }
+
+    const user = await User.findOne({ email: email.trim().toLowerCase() });
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    if (currentPassword && !(await user.matchPassword(currentPassword))) {
+    if (!currentPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Current password is required to change password. If you forgot your password, please use the "Forgot Password" option to reset it via email.'
+      });
+    }
+
+    const isMatch = await user.matchPassword(currentPassword);
+    if (!isMatch) {
       return res.status(401).json({ success: false, message: 'Current password does not match' });
     }
 
     user.password = newPassword;
     await user.save();
+
+    await createAuditLog({
+      req,
+      action: 'PASSWORD_CHANGED',
+      module: 'AUTHENTICATION',
+      description: `Password changed for user ${user.email}`,
+      severity: 'INFO',
+      status: 'SUCCESS',
+      metadata: { email: user.email }
+    });
 
     res.json({
       success: true,
@@ -444,6 +634,9 @@ export {
   loginUser,
   logoutUser,
   changePassword,
+  forgotPassword,
+  verifyResetToken,
+  resetPassword,
   refreshAccessToken,
   logoutAll,
   getCurrentUser,

@@ -4,6 +4,9 @@ import {
   loginUser,
   logoutUser,
   changePassword,
+  forgotPassword,
+  verifyResetToken,
+  resetPassword,
   refreshAccessToken,
   logoutAll,
   getCurrentUser,
@@ -18,6 +21,9 @@ const router = express.Router();
 router.post('/register', registerUser);
 router.post('/login', loginUser);
 router.post('/change-password', changePassword);
+router.post('/forgot-password', forgotPassword);
+router.get('/verify-reset-token', verifyResetToken);
+router.post('/reset-password', resetPassword);
 router.post('/refresh', refreshAccessToken);
 router.post('/logout', protect, logoutUser);
 router.post('/logout-all', protect, logoutAll);
