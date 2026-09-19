@@ -159,24 +159,6 @@ export const getDashboardKpis = async (req, res) => {
  * KPIs, Monthly sales charts, Leads by Source & Area, Sales by Person, Overdue invoices,
  * Pending follow-ups, Open service tickets, Best margin project, Order-to-Cash chain, and Recent activity.
  */
-// Resolves the "period" query param into a concrete date range.
-// null return means "no restriction" (matches the old, always-global behavior).
-const resolvePeriodRange = (period, now) => {
-  if (period === 'This month') {
-    return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: now };
-  }
-  if (period === 'This quarter') {
-    const qStartMonth = Math.floor(now.getMonth() / 3) * 3;
-    return { start: new Date(now.getFullYear(), qStartMonth, 1), end: now };
-  }
-  if (typeof period === 'string' && period.startsWith('FY')) {
-    // Indian fiscal year: Apr 1 - Mar 31.
-    const fyStartYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
-    return { start: new Date(fyStartYear, 3, 1), end: now };
-  }
-  return null;
-};
-
 export const getDashboardOverview = async (req, res) => {
   try {
     const since90d = new Date(Date.now() - NINETY_DAYS_MS);
@@ -184,7 +166,6 @@ export const getDashboardOverview = async (req, res) => {
     const periodRange = getPeriodRange(req.query.period);
     await generateFollowUps();
 
-    const periodRange = resolvePeriodRange(req.query.period, now);
     const salesperson = req.query.salesperson && req.query.salesperson !== 'All' ? req.query.salesperson : null;
     const area = req.query.area && req.query.area !== 'All' ? req.query.area : null;
 
