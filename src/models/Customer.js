@@ -30,6 +30,10 @@ const customerSchema = new mongoose.Schema({
   notes: { type: String },
 }, { timestamps: true });
 
+// getCustomers() runs Customer.find(filter).sort({ createdAt: -1 }); this
+// backs that sort the same way as Lead's -- see leadSchema.index() there.
+customerSchema.index({ createdAt: -1 });
+
 customerSchema.pre('validate', async function () {
   if (!this.id) {
     const count = await mongoose.model('Customer').countDocuments();

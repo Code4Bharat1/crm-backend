@@ -18,4 +18,9 @@ const leadSchema = new mongoose.Schema({
   convertedAt: { type: Date, default: null },
 }, { timestamps: true });
 
+// getLeads() runs Lead.find().sort({ createdAt: -1 }) with no filter --
+// without this index every call does an in-memory sort over the full
+// collection on top of the network round trip to the (remote) DB host.
+leadSchema.index({ createdAt: -1 });
+
 export default mongoose.model('Lead',leadSchema);
