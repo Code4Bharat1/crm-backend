@@ -158,11 +158,42 @@ export const getDashboardKpis = async (req, res) => {
  * KPIs, Monthly sales charts, Leads by Source & Area, Sales by Person, Overdue invoices,
  * Pending follow-ups, Open service tickets, Best margin project, Order-to-Cash chain, and Recent activity.
  */
+// Resolves the "period" query param into a concrete date range.
+// null return means "no restriction" (matches the old, always-global behavior).
+const resolvePeriodRange = (period, now) => {
+  if (period === 'This month') {
+    return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: now };
+  }
+  if (period === 'This quarter') {
+    const qStartMonth = Math.floor(now.getMonth() / 3) * 3;
+    return { start: new Date(now.getFullYear(), qStartMonth, 1), end: now };
+  }
+  if (typeof period === 'string' && period.startsWith('FY')) {
+    // Indian fiscal year: Apr 1 - Mar 31.
+    const fyStartYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    return { start: new Date(fyStartYear, 3, 1), end: now };
+  }
+  return null;
+};
+
 export const getDashboardOverview = async (req, res) => {
   try {
     const since90d = new Date(Date.now() - NINETY_DAYS_MS);
     const startOfToday = new Date(new Date().setHours(0, 0, 0, 0));
+    const now = new Date();
     await generateFollowUps();
+
+    const periodRange = resolvePeriodRange(req.query.period, now);
+    const salesperson = req.query.salesperson && req.query.salesperson !== 'All' ? req.query.salesperson : null;
+    const area = req.query.area && req.query.area !== 'All' ? req.query.area : null;
+
+    // Reusable $match fragments. Each is only applied to models that actually
+    // carry the relevant field — invoices/projects/service/products have no
+    // salesperson or area dimension, so those two filters legitimately don't
+    // affect them (that's a real data limitation, not a bug).
+    const dateMatch = (field) => (periodRange ? { [field]: { $gte: periodRange.start, $lte: periodRange.end } } : {});
+    const spMatch = (field = 'salesperson') => (salesperson ? { [field]: salesperson } : {});
+    const areaMatch = area ? { area } : {};
 
     // 1. KPI aggregations
     const [
@@ -186,19 +217,20 @@ export const getDashboardOverview = async (req, res) => {
       deliveryCount,
       invoiceCount
     ] = await Promise.all([
-      Lead.countDocuments(),
-      Lead.countDocuments({ stage: 'New' }),
-      Lead.countDocuments({ stage: 'Hot' }),
-      Lead.countDocuments({ stage: 'Potential' }),
-      Lead.countDocuments({ stage: 'Lost' }),
-      Lead.countDocuments({ stage: 'Won' }),
+      Lead.countDocuments({ ...dateMatch('createdAt'), ...spMatch(), ...areaMatch }),
+      Lead.countDocuments({ stage: 'New', ...dateMatch('createdAt'), ...spMatch(), ...areaMatch }),
+      Lead.countDocuments({ stage: 'Hot', ...dateMatch('createdAt'), ...spMatch(), ...areaMatch }),
+      Lead.countDocuments({ stage: 'Potential', ...dateMatch('createdAt'), ...spMatch(), ...areaMatch }),
+      Lead.countDocuments({ stage: 'Lost', ...dateMatch('createdAt'), ...spMatch(), ...areaMatch }),
+      Lead.countDocuments({ stage: 'Won', ...dateMatch('createdAt'), ...spMatch(), ...areaMatch }),
 
       Quotation.aggregate([
-        { $match: { status: { $in: OPEN_QUOTATION_STATUSES } } },
+        { $match: { status: { $in: OPEN_QUOTATION_STATUSES }, ...dateMatch('date'), ...spMatch() } },
         { $group: { _id: null, count: { $sum: 1 }, value: { $sum: '$grandTotal' } } },
       ]),
 
       SalesOrder.aggregate([
+        { $match: { ...dateMatch('date'), ...spMatch() } },
         {
           $group: {
             _id: null,
@@ -210,6 +242,7 @@ export const getDashboardOverview = async (req, res) => {
       ]),
 
       SalesInvoice.aggregate([
+        { $match: { ...dateMatch('date') } },
         {
           $group: {
             _id: null,
@@ -221,11 +254,12 @@ export const getDashboardOverview = async (req, res) => {
 
       SalesInvoice.aggregate([
         { $unwind: '$payments' },
-        { $match: { 'payments.date': { $gte: since90d } } },
+        { $match: { 'payments.date': periodRange ? { $gte: periodRange.start, $lte: periodRange.end } : { $gte: since90d } } },
         { $group: { _id: null, total: { $sum: '$payments.amount' } } },
       ]),
 
       Project.aggregate([
+        { $match: { ...dateMatch('start') } },
         {
           $addFields: { costTotal: { $sum: '$costs.amount' } },
         },
@@ -240,6 +274,7 @@ export const getDashboardOverview = async (req, res) => {
       ]),
 
       ServiceRequest.aggregate([
+        { $match: { ...dateMatch('createdAt') } },
         {
           $group: {
             _id: null,
@@ -251,8 +286,8 @@ export const getDashboardOverview = async (req, res) => {
 
       Product.countDocuments({ $expr: { $lt: ['$stock', '$minStock'] } }),
       Product.countDocuments(),
-      FollowUp.countDocuments({ status: 'Pending' }),
-      FollowUp.countDocuments({ status: 'Pending', dueDate: { $lt: startOfToday } }),
+      FollowUp.countDocuments({ status: 'Pending', ...dateMatch('dueDate'), ...spMatch('owner') }),
+      FollowUp.countDocuments({ status: 'Pending', dueDate: { $lt: startOfToday }, ...spMatch('owner') }),
       ProformaInvoice.countDocuments(),
       DeliveryNote.countDocuments(),
       SalesInvoice.countDocuments()
@@ -292,7 +327,8 @@ export const getDashboardOverview = async (req, res) => {
     };
 
     // 2. Real Monthly Trends (Past 6 months: Quotations, Sales Orders, Collections)
-    const now = new Date();
+    // This chart is intentionally always "last 6 months" regardless of the Period
+    // filter (it's a trend view, not a snapshot) — but salesperson still narrows it.
     const monthlySales = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -305,6 +341,7 @@ export const getDashboardOverview = async (req, res) => {
         Quotation.aggregate([
           {
             $match: {
+              ...spMatch(),
               $or: [
                 { date: { $gte: startOfMonth, $lte: endOfMonth } },
                 { createdAt: { $gte: startOfMonth, $lte: endOfMonth } }
@@ -317,6 +354,7 @@ export const getDashboardOverview = async (req, res) => {
           {
             $match: {
               status: { $ne: 'Cancelled' },
+              ...spMatch(),
               $or: [
                 { date: { $gte: startOfMonth, $lte: endOfMonth } },
                 { createdAt: { $gte: startOfMonth, $lte: endOfMonth } }
@@ -342,20 +380,25 @@ export const getDashboardOverview = async (req, res) => {
 
     // 3. Leads by Source (real data)
     const rawSources = await Lead.aggregate([
+      { $match: { ...dateMatch('createdAt'), ...spMatch(), ...areaMatch } },
       { $group: { _id: { $ifNull: ['$source', 'Direct'] }, value: { $sum: 1 } } },
       { $sort: { value: -1 } }
     ]);
     const leadsBySource = rawSources.map(s => ({ name: s._id, value: s.value }));
 
-    // 4. Leads by Area (real data)
+    // 4. Leads by Area (real data) -- deliberately NOT filtered by `area` itself:
+    // this chart's whole purpose is to show the area breakdown, so narrowing it to
+    // one area would collapse it to a single bar instead of a comparison.
     const rawAreas = await Lead.aggregate([
+      { $match: { ...dateMatch('createdAt'), ...spMatch() } },
       { $group: { _id: { $ifNull: ['$area', 'General'] }, leads: { $sum: 1 } } },
       { $sort: { leads: -1 } },
       { $limit: 6 }
     ]);
     const leadsByArea = rawAreas.map(a => ({ name: a._id, leads: a.leads }));
 
-    // 5. Salesperson Performance (real data)
+    // 5. Salesperson Performance (real data) -- not filtered by `salesperson` itself,
+    // same reasoning as Leads by Area above (it's the per-person comparison).
     const salesEmployees = await Employee.find({
       $or: [
         { role: { $regex: /sales/i } },
@@ -364,7 +407,7 @@ export const getDashboardOverview = async (req, res) => {
     }).select('fullName role');
 
     const rawSales = await SalesOrder.aggregate([
-      { $match: { status: { $ne: 'Cancelled' } } },
+      { $match: { status: { $ne: 'Cancelled' }, ...dateMatch('date') } },
       { $group: { _id: '$salesperson', achieved: { $sum: '$grandTotal' } } }
     ]);
     const salesMap = new Map();
@@ -381,6 +424,7 @@ export const getDashboardOverview = async (req, res) => {
 
     // 6. Product-wise Quotations vs Orders (real data)
     const quotedItems = await Quotation.aggregate([
+      { $match: { ...dateMatch('date'), ...spMatch() } },
       { $unwind: '$items' },
       { $group: { _id: '$items.description', quoted: { $sum: { $ifNull: ['$items.qty', '$items.quantity'] } } } },
       { $sort: { quoted: -1 } },
@@ -388,6 +432,7 @@ export const getDashboardOverview = async (req, res) => {
     ]);
 
     const orderedItems = await SalesOrder.aggregate([
+      { $match: { ...dateMatch('date'), ...spMatch() } },
       { $unwind: '$items' },
       { $group: { _id: '$items.description', sold: { $sum: { $ifNull: ['$items.qty', '$items.quantity'] } } } }
     ]);
@@ -411,9 +456,11 @@ export const getDashboardOverview = async (req, res) => {
       payments: pay.total
     };
 
-    // 8. Overdue Invoices list (real data)
+    // 8. Overdue Invoices list (real data) -- no salesperson/area dimension on invoices,
+    // so only the Period filter (on invoice date) applies here.
     const rawOverdue = await SalesInvoice.find({
       balanceAmount: { $gt: 0 },
+      ...dateMatch('date'),
       $or: [
         { status: 'Overdue' },
         { dueDate: { $lt: now } }
@@ -431,7 +478,7 @@ export const getDashboardOverview = async (req, res) => {
     }));
 
     // 9. Due Follow-ups list -- real rows from the Follow-up Engine (generateFollowUps already ran above)
-    const rawFollowUps = await FollowUp.find({ status: 'Pending' }).sort({ dueDate: 1 }).limit(6).lean();
+    const rawFollowUps = await FollowUp.find({ status: 'Pending', ...dateMatch('dueDate'), ...spMatch('owner') }).sort({ dueDate: 1 }).limit(6).lean();
 
     const dueFollowUps = rawFollowUps.map(f => ({
       id: String(f._id),
@@ -442,9 +489,11 @@ export const getDashboardOverview = async (req, res) => {
       status: f.dueDate < startOfToday ? 'Overdue' : 'Pending'
     }));
 
-    // 10. Open Service Requests (real data)
+    // 10. Open Service Requests (real data) -- no salesperson/area dimension on service
+    // requests, so only the Period filter applies here.
     const rawService = await ServiceRequest.find({
-      status: { $nin: CLOSED_SERVICE_STATUSES }
+      status: { $nin: CLOSED_SERVICE_STATUSES },
+      ...dateMatch('createdAt'),
     }).sort({ createdAt: -1 }).limit(5).lean();
 
     const serviceRequests = rawService.map(s => ({
@@ -456,8 +505,9 @@ export const getDashboardOverview = async (req, res) => {
       status: s.status || 'New'
     }));
 
-    // 11. Top Project by margin (real data)
-    const rawProjects = await Project.find().lean();
+    // 11. Top Project by margin (real data) -- no salesperson/area dimension on
+    // projects, so only the Period filter (project start date) applies here.
+    const rawProjects = await Project.find({ ...dateMatch('start') }).lean();
     let topProject = null;
     if (rawProjects.length > 0) {
       rawProjects.forEach(p => {
