@@ -12,6 +12,7 @@ import AuditLog from '../models/AuditLog.js';
 import Customer from '../models/Customer.js';
 import FollowUp from '../models/FollowUp.js';
 import { generateFollowUps } from '../utils/followUpEngine.js';
+import { getPeriodRange, monthsBetween } from '../utils/periodRange.js';
 
 const OPEN_QUOTATION_STATUSES = ['Draft', 'Sent', 'Viewed'];
 const PENDING_DELIVERY_STATUSES = ['Confirmed', 'In Progress', 'Partially Delivered'];
@@ -180,7 +181,7 @@ export const getDashboardOverview = async (req, res) => {
   try {
     const since90d = new Date(Date.now() - NINETY_DAYS_MS);
     const startOfToday = new Date(new Date().setHours(0, 0, 0, 0));
-    const now = new Date();
+    const periodRange = getPeriodRange(req.query.period);
     await generateFollowUps();
 
     const periodRange = resolvePeriodRange(req.query.period, now);
@@ -326,12 +327,19 @@ export const getDashboardOverview = async (req, res) => {
       overdueFollowUps
     };
 
-    // 2. Real Monthly Trends (Past 6 months: Quotations, Sales Orders, Collections)
-    // This chart is intentionally always "last 6 months" regardless of the Period
-    // filter (it's a trend view, not a snapshot) — but salesperson still narrows it.
+    // 2. Real Monthly Trends (Quotations, Sales Orders, Collections) — the
+    // requested period's own months when one was recognized, otherwise the
+    // trailing 6 months anchored to now (unchanged default behavior).
+    const now = new Date();
+    const monthEntries = periodRange
+      ? monthsBetween(periodRange.start, periodRange.end)
+      : Array.from({ length: 6 }, (_, idx) => {
+          const d = new Date(now.getFullYear(), now.getMonth() - (5 - idx), 1);
+          return { year: d.getFullYear(), month: d.getMonth() };
+        });
     const monthlySales = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    for (const { year: mYear, month: mMonth } of monthEntries) {
+      const d = new Date(mYear, mMonth, 1);
       const startOfMonth = new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0);
       const endOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0, 23, 59, 59, 999);
       const monthLabel = d.toLocaleString('en-IN', { month: 'short' });
@@ -525,8 +533,12 @@ export const getDashboardOverview = async (req, res) => {
       };
     }
 
-    // 12. Recent System & Customer Activity (real data from AuditLog)
-    const rawLogs = await AuditLog.find().sort({ createdAt: -1 }).limit(6).lean();
+    // 12. Recent System & Customer Activity (real data from AuditLog) —
+    // scoped to the requested period when one was recognized, otherwise the
+    // latest 6 entries overall (unchanged default behavior).
+    const rawLogs = periodRange
+      ? await AuditLog.find({ createdAt: { $gte: periodRange.start, $lte: periodRange.end } }).sort({ createdAt: -1 }).limit(20).lean()
+      : await AuditLog.find().sort({ createdAt: -1 }).limit(6).lean();
     const recentActivity = rawLogs.map(l => ({
       id: l._id.toString(),
       kind: l.module === 'AUTHENTICATION' ? 'Auth' : l.module === 'EMPLOYEE' ? 'Staff' : l.module === 'ATTENDANCE' ? 'Attendance' : 'Event',
