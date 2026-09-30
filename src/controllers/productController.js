@@ -54,6 +54,11 @@ export const getProductById = async (req, res) => {
 
 export const createProduct = async (req, res) => {
   try {
+    if (req.body.stock !== undefined) req.body.stock = Math.max(0, Number(req.body.stock) || 0);
+    if (req.body.minStock !== undefined) req.body.minStock = Math.max(0, Number(req.body.minStock) || 0);
+    if (req.body.price !== undefined) req.body.price = Math.max(0, Number(req.body.price) || 0);
+    if (req.body.costPrice !== undefined) req.body.costPrice = Math.max(0, Number(req.body.costPrice) || 0);
+
     const product = new Product(req.body);
     await product.save();
     res.status(201).json(product);
@@ -67,6 +72,12 @@ export const updateProduct = async (req, res) => {
     const doc = await Product.findOne({ itemCode: req.params.id })
       || await Product.findById(req.params.id).catch(() => null);
     if (!doc) return res.status(404).json({ message: 'Product not found' });
+
+    if (req.body.stock !== undefined) req.body.stock = Math.max(0, Number(req.body.stock) || 0);
+    if (req.body.minStock !== undefined) req.body.minStock = Math.max(0, Number(req.body.minStock) || 0);
+    if (req.body.price !== undefined) req.body.price = Math.max(0, Number(req.body.price) || 0);
+    if (req.body.costPrice !== undefined) req.body.costPrice = Math.max(0, Number(req.body.costPrice) || 0);
+
     Object.assign(doc, req.body);
     await doc.save();
     res.json(doc);
@@ -95,9 +106,22 @@ export const adjustStock = async (req, res) => {
     if (!doc) return res.status(404).json({ message: 'Product not found' });
 
     if (newStock !== undefined) {
-      doc.stock = Math.max(0, Number(newStock));
+      const parsedNew = Number(newStock);
+      if (isNaN(parsedNew) || parsedNew < 0) {
+        return res.status(400).json({ message: 'Stock level cannot be negative' });
+      }
+      doc.stock = parsedNew;
     } else if (delta !== undefined) {
-      doc.stock = Math.max(0, doc.stock + Number(delta));
+      const parsedDelta = Number(delta);
+      if (isNaN(parsedDelta)) {
+        return res.status(400).json({ message: 'Invalid quantity adjustment' });
+      }
+      if (doc.stock + parsedDelta < 0) {
+        return res.status(400).json({
+          message: `Adjustment rejected: stock cannot become negative. Maximum allowed reduction is -${doc.stock}`
+        });
+      }
+      doc.stock = doc.stock + parsedDelta;
     }
 
     if (doc.stock === 0) {

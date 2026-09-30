@@ -7,12 +7,23 @@ import { sendWelcomeEmail } from '../utils/sendWelcomeEmail.js';
 import { sendEmployeeUpdateEmail } from '../utils/sendEmployeeUpdateEmail.js';
 import { findMatchingRoleInList } from '../utils/roleMatcher.js';
 
+const validatePhoneNumber = (phone) => {
+  if (!phone || typeof phone !== 'string') return false;
+  const cleaned = phone.replace(/\D/g, '');
+  return /^[6-9]\d{9}$/.test(cleaned);
+};
+
 export const createEmployee = async (req, res) => {
   try {
     const { firstName, lastName, role, department, phone, email, employmentType, joiningDate, status } = req.body;
 
     if (!firstName || !lastName || !role || !phone || !email) {
       return res.status(400).json({ success: false, message: 'Missing required fields (First name, Last name, Role, Phone, Email)' });
+    }
+
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (cleanPhone.length !== 10 || !validatePhoneNumber(cleanPhone)) {
+      return res.status(400).json({ success: false, message: 'Please provide a valid 10-digit mobile number (e.g. 9876543210)' });
     }
 
     const existingEmail = await Employee.findOne({ email });
@@ -198,7 +209,13 @@ export const updateEmployee = async (req, res) => {
       employee.role = normalizedRole;
     }
     if (department) employee.department = department;
-    if (phone) employee.phone = phone;
+    if (phone !== undefined) {
+      const cleanPhone = String(phone).replace(/\D/g, '');
+      if (cleanPhone.length !== 10 || !validatePhoneNumber(cleanPhone)) {
+        return res.status(400).json({ success: false, message: 'Please provide a valid 10-digit mobile number (e.g. 9876543210)' });
+      }
+      employee.phone = cleanPhone;
+    }
     if (email && email !== employee.email) {
       const existing = await Employee.findOne({ email });
       if (existing) {
@@ -222,7 +239,7 @@ export const updateEmployee = async (req, res) => {
       severity: 'INFO'
     });
 
-   
+
     // Sync corresponding User account if exists
     try {
       const user = await User.findOne({ $or: [{ employeeId: employee._id }, { email: employee.email }] });
@@ -310,7 +327,7 @@ export const getEmployeeStats = async (req, res) => {
   try {
     const totalEmployees = await Employee.countDocuments({ isActive: true });
     const directors = await Employee.countDocuments({ role: 'Director', isActive: true });
-    
+
     // Using Salesperson, Engineer, and Service as field roles per the UI prompt logic
     const fieldRoles = ['Salesperson', 'Engineer', 'Service'];
     const fieldTeam = await Employee.countDocuments({ role: { $in: fieldRoles }, isActive: true });

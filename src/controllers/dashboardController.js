@@ -166,16 +166,13 @@ export const getDashboardOverview = async (req, res) => {
     const periodRange = getPeriodRange(req.query.period);
     await generateFollowUps();
 
-    const salesperson = req.query.salesperson && req.query.salesperson !== 'All' ? req.query.salesperson : null;
-    const area = req.query.area && req.query.area !== 'All' ? req.query.area : null;
+    const salesperson = req.query.salesperson && req.query.salesperson !== 'All' && req.query.salesperson !== 'All salespeople' ? req.query.salesperson.trim() : null;
+    const area = req.query.area && req.query.area !== 'All' && req.query.area !== 'All areas' ? req.query.area.trim() : null;
 
-    // Reusable $match fragments. Each is only applied to models that actually
-    // carry the relevant field — invoices/projects/service/products have no
-    // salesperson or area dimension, so those two filters legitimately don't
-    // affect them (that's a real data limitation, not a bug).
+    // Reusable $match fragments.
     const dateMatch = (field) => (periodRange ? { [field]: { $gte: periodRange.start, $lte: periodRange.end } } : {});
-    const spMatch = (field = 'salesperson') => (salesperson ? { [field]: salesperson } : {});
-    const areaMatch = area ? { area } : {};
+    const spMatch = (field = 'salesperson') => (salesperson ? { [field]: { $regex: new RegExp(`^${salesperson.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } } : {});
+    const areaMatch = area ? { area: { $regex: new RegExp(`^${area.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } } : {};
 
     // 1. KPI aggregations
     const [
@@ -530,6 +527,31 @@ export const getDashboardOverview = async (req, res) => {
       severity: l.severity === 'CRITICAL' ? 'danger' : l.severity === 'WARNING' ? 'warning' : 'info'
     }));
 
+    // 13. Dynamic Filter Options for Frontend Filters
+    const [empList, soSalespeople, leadSalespeople, leadAreas] = await Promise.all([
+      Employee.find({
+        $or: [
+          { role: { $regex: /sales/i } },
+          { department: { $regex: /sales/i } }
+        ]
+      }).select('fullName').lean(),
+      SalesOrder.distinct('salesperson'),
+      Lead.distinct('salesperson'),
+      Lead.distinct('area')
+    ]);
+
+    const allSalespeople = Array.from(
+      new Set([
+        ...empList.map(e => e.fullName),
+        ...soSalespeople,
+        ...leadSalespeople
+      ].filter(Boolean).map(s => s.trim()))
+    ).sort();
+
+    const allAreas = Array.from(
+      new Set(leadAreas.filter(Boolean).map(a => a.trim()))
+    ).sort();
+
     res.json({
       success: true,
       data: {
@@ -544,7 +566,11 @@ export const getDashboardOverview = async (req, res) => {
         dueFollowUps,
         serviceRequests,
         topProject,
-        recentActivity
+        recentActivity,
+        filterOptions: {
+          salespeople: allSalespeople,
+          areas: allAreas
+        }
       }
     });
   } catch (error) {

@@ -54,7 +54,7 @@ const getSidebarPermissionsForRole = async (roleName) => {
 
 const generateToken = (id, type = 'access') => {
   const secret = type === 'access' ? process.env.JWT_SECRET : (process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET);
-  const expiresIn = type === 'access' ? (process.env.ACCESS_TOKEN_EXPIRES_IN || '15m') : (process.env.REFRESH_TOKEN_EXPIRES_IN || '7d');
+  const expiresIn = type === 'access' ? (process.env.ACCESS_TOKEN_EXPIRES_IN || '7d') : (process.env.REFRESH_TOKEN_EXPIRES_IN || '30d');
   return jwt.sign({ id, type }, secret, { expiresIn });
 };
 
@@ -148,7 +148,8 @@ const loginUser = async (req, res) => {
         permissions,
         sidebarPermissions,
         token: accessToken,
-        accessToken
+        accessToken,
+        refreshToken
       }
     });
   } else {
@@ -166,7 +167,7 @@ const loginUser = async (req, res) => {
 };
 
 const refreshAccessToken = async (req, res) => {
-  const { refreshToken } = req.cookies;
+  const refreshToken = req.body?.refreshToken || req.cookies?.refreshToken || req.headers['x-refresh-token'];
   
   if (!refreshToken) {
     return res.status(401).json({ success: false, message: 'Refresh token not found' });
@@ -237,6 +238,8 @@ const refreshAccessToken = async (req, res) => {
       success: true,
       data: {
         accessToken: newAccessToken,
+        token: newAccessToken,
+        refreshToken: newRefreshToken,
         user: {
           id: user._id,
           name: user.name,

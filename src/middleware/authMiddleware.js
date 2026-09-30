@@ -31,6 +31,9 @@ const protect = async (req, res, next) => {
   if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
     try {
       token = req.headers.authorization.split(' ')[1];
+      if (!token || token === 'null' || token === 'undefined') {
+        return res.status(401).json({ success: false, message: 'Not authorized, no token' });
+      }
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
       if (decoded.type && decoded.type !== 'access') {
         throw new Error('Not an access token');
@@ -39,20 +42,17 @@ const protect = async (req, res, next) => {
       if (userId) {
         req.user = await getCachedUser(userId);
       }
+      if (!req.user) {
+        return res.status(401).json({ success: false, message: 'User session not found for token' });
+      }
       return next();
     } catch (error) {
-      if (req.body?.employeeId || req.query?.employeeId || req.method === 'GET') {
-        return next();
-      }
-      return res.status(401).json({ success: false, message: 'Not authorized, token failed' });
+      return res.status(401).json({ success: false, message: 'Not authorized, token expired or invalid', error: error.name });
     }
   }
 
   if (!token) {
-    if (req.body?.employeeId || req.query?.employeeId || req.method === 'GET') {
-      return next();
-    }
-    return res.status(401).json({ message: 'Not authorized, no token' });
+    return res.status(401).json({ success: false, message: 'Not authorized, no token provided' });
   }
 };
 
