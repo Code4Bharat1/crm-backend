@@ -170,7 +170,18 @@ export const getDashboardOverview = async (req, res) => {
     const area = req.query.area && req.query.area !== 'All' && req.query.area !== 'All areas' ? req.query.area.trim() : null;
 
     // Reusable $match fragments.
-    const dateMatch = (field) => (periodRange ? { [field]: { $gte: periodRange.start, $lte: periodRange.end } } : {});
+    const dateMatch = (field = 'date') => {
+      if (!periodRange) return {};
+      if (field === 'createdAt') {
+        return { createdAt: { $gte: periodRange.start, $lte: periodRange.end } };
+      }
+      return {
+        $or: [
+          { [field]: { $gte: periodRange.start, $lte: periodRange.end } },
+          { createdAt: { $gte: periodRange.start, $lte: periodRange.end } }
+        ]
+      };
+    };
     const spMatch = (field = 'salesperson') => (salesperson ? { [field]: { $regex: new RegExp(`^${salesperson.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } } : {});
     const areaMatch = area ? { area: { $regex: new RegExp(`^${area.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } } : {};
 
@@ -183,6 +194,7 @@ export const getDashboardOverview = async (req, res) => {
       lostLeads,
       wonLeads,
       quotationAgg,
+      totalQuotationCount,
       orderAgg,
       invoiceAgg,
       paymentAgg,
@@ -196,17 +208,19 @@ export const getDashboardOverview = async (req, res) => {
       deliveryCount,
       invoiceCount
     ] = await Promise.all([
-      Lead.countDocuments({ ...dateMatch('createdAt'), ...spMatch(), ...areaMatch }),
-      Lead.countDocuments({ stage: 'New', ...dateMatch('createdAt'), ...spMatch(), ...areaMatch }),
-      Lead.countDocuments({ stage: 'Hot', ...dateMatch('createdAt'), ...spMatch(), ...areaMatch }),
-      Lead.countDocuments({ stage: 'Potential', ...dateMatch('createdAt'), ...spMatch(), ...areaMatch }),
-      Lead.countDocuments({ stage: 'Lost', ...dateMatch('createdAt'), ...spMatch(), ...areaMatch }),
-      Lead.countDocuments({ stage: 'Won', ...dateMatch('createdAt'), ...spMatch(), ...areaMatch }),
+      Lead.countDocuments({ ...dateMatch('date'), ...spMatch(), ...areaMatch }),
+      Lead.countDocuments({ stage: 'New', ...dateMatch('date'), ...spMatch(), ...areaMatch }),
+      Lead.countDocuments({ stage: 'Hot', ...dateMatch('date'), ...spMatch(), ...areaMatch }),
+      Lead.countDocuments({ stage: 'Potential', ...dateMatch('date'), ...spMatch(), ...areaMatch }),
+      Lead.countDocuments({ stage: 'Lost', ...dateMatch('date'), ...spMatch(), ...areaMatch }),
+      Lead.countDocuments({ stage: 'Won', ...dateMatch('date'), ...spMatch(), ...areaMatch }),
 
       Quotation.aggregate([
         { $match: { status: { $in: OPEN_QUOTATION_STATUSES }, ...dateMatch('date'), ...spMatch() } },
         { $group: { _id: null, count: { $sum: 1 }, value: { $sum: '$grandTotal' } } },
       ]),
+
+      Quotation.countDocuments({ ...dateMatch('date'), ...spMatch() }),
 
       SalesOrder.aggregate([
         { $match: { ...dateMatch('date'), ...spMatch() } },
@@ -253,7 +267,7 @@ export const getDashboardOverview = async (req, res) => {
       ]),
 
       ServiceRequest.aggregate([
-        { $match: { ...dateMatch('createdAt') } },
+        { $match: { ...dateMatch('scheduledOn') } },
         {
           $group: {
             _id: null,
@@ -267,9 +281,9 @@ export const getDashboardOverview = async (req, res) => {
       Product.countDocuments(),
       FollowUp.countDocuments({ status: 'Pending', ...dateMatch('dueDate'), ...spMatch('owner') }),
       FollowUp.countDocuments({ status: 'Pending', dueDate: { $lt: startOfToday }, ...spMatch('owner') }),
-      ProformaInvoice.countDocuments(),
-      DeliveryNote.countDocuments(),
-      SalesInvoice.countDocuments()
+      ProformaInvoice.countDocuments({ ...dateMatch('date'), ...spMatch() }),
+      DeliveryNote.countDocuments({ ...dateMatch('date'), ...spMatch() }),
+      SalesInvoice.countDocuments({ ...dateMatch('date') })
     ]);
 
     const q = quotationAgg[0] || { count: 0, value: 0 };
@@ -434,7 +448,7 @@ export const getDashboardOverview = async (req, res) => {
     // 7. Order-To-Cash Chain (real counts)
     const orderToCash = {
       leads: totalLeads,
-      quotations: q.count,
+      quotations: totalQuotationCount,
       proformas: proformaCount,
       orders: o.confirmedOrders,
       deliveries: deliveryCount,

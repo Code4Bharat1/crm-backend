@@ -2,6 +2,7 @@ import ProformaInvoice from '../models/ProformaInvoice.js';
 import SalesOrder from '../models/SalesOrder.js';
 import { deductInventoryStock } from './salesOrderController.js';
 import SalesInvoice from '../models/SalesInvoice.js';
+import { sendDocumentEmail } from '../utils/sendDocumentEmail.js';
 
 const generateProformaNo = async () => {
   const year = new Date().getFullYear();
@@ -45,6 +46,12 @@ export const createProforma = async (req, res) => {
     const proformaNo = req.body.proformaNo || await generateProformaNo();
     const proforma = new ProformaInvoice({ ...req.body, proformaNo });
     await proforma.save();
+
+    // Send automated email to the customer
+    sendDocumentEmail('Proforma Invoice', proforma).catch(err =>
+      console.error('[createProforma] Error sending email:', err.message)
+    );
+
     res.status(201).json(proforma);
   } catch (error) {
     res.status(400).json({ message: 'Error creating proforma', error: error.message });

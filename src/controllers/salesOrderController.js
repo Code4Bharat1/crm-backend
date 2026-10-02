@@ -4,6 +4,8 @@ import SalesInvoice from '../models/SalesInvoice.js';
 import PurchaseOrder from '../models/PurchaseOrder.js';
 import ProformaInvoice from '../models/ProformaInvoice.js';
 import Product from '../models/Product.js';
+import Notification from '../models/Notification.js';
+import { sendDocumentEmail } from '../utils/sendDocumentEmail.js';
 
 export const deductInventoryStock = async (items) => {
   if (!items || !items.length) return;
@@ -222,6 +224,11 @@ export const createInvoiceFromSO = async (req, res) => {
     so.invoices = [...(so.invoices || []), invoiceNo];
     so.status = 'Invoiced';
     await so.save();
+
+    // Send automated email to the customer
+    sendDocumentEmail('Sales Invoice', invoice).catch(err =>
+      console.error('[createInvoiceFromSO] Error sending email:', err.message)
+    );
 
     res.status(201).json(invoice);
   } catch (error) {

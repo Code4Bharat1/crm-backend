@@ -1,6 +1,7 @@
 import SalesInvoice from '../models/SalesInvoice.js';
 import ProformaInvoice from '../models/ProformaInvoice.js';
 import SalesOrder from '../models/SalesOrder.js';
+import { sendDocumentEmail } from '../utils/sendDocumentEmail.js';
 
 const generateInvoiceNo = async () => {
   const year = new Date().getFullYear();
@@ -79,6 +80,12 @@ export const createInvoice = async (req, res) => {
 
     const invoice = new SalesInvoice({ ...req.body, advanceAdjusted, invoiceNo, amountInWords });
     await invoice.save();
+
+    // Send automated email to the customer
+    sendDocumentEmail('Sales Invoice', invoice).catch(err =>
+      console.error('[createInvoice] Error sending email:', err.message)
+    );
+
     res.status(201).json(invoice);
   } catch (error) {
     res.status(400).json({ message: 'Error creating invoice', error: error.message });

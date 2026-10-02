@@ -2,6 +2,8 @@ import DeliveryNote from '../models/DeliveryNote.js';
 import SalesOrder from '../models/SalesOrder.js';
 import SalesInvoice from '../models/SalesInvoice.js';
 import ProformaInvoice from '../models/ProformaInvoice.js';
+import Notification from '../models/Notification.js';
+import { sendDocumentEmail } from '../utils/sendDocumentEmail.js';
 
 const generateDnNo = async () => {
   const year = new Date().getFullYear();
@@ -211,6 +213,11 @@ export const createInvoiceFromDeliveryNote = async (req, res) => {
         await so.save();
       }
     }
+
+    // Send automated email to the customer
+    sendDocumentEmail('Sales Invoice', invoice).catch(err =>
+      console.error('[createInvoiceFromDeliveryNote] Error sending email:', err.message)
+    );
 
     res.status(201).json(invoice);
   } catch (error) {

@@ -3,6 +3,7 @@ import ProformaInvoice from '../models/ProformaInvoice.js';
 import SalesOrder from '../models/SalesOrder.js';
 import Lead from '../models/Lead.js';
 import { deductInventoryStock } from './salesOrderController.js';
+import { sendDocumentEmail } from '../utils/sendDocumentEmail.js';
 
 // Sync lead stage to "Quotation Sent" when quotation is created/sent
 const syncLeadToQuotationSent = async (customerName, quotationNo) => {
@@ -82,6 +83,12 @@ export const createQuotation = async (req, res) => {
     const quotation = new Quotation({ ...body, quotationNo });
     await quotation.save();
     await syncLeadToQuotationSent(quotation.customer?.name, quotation.quotationNo);
+
+    // Send automated email to the customer
+    sendDocumentEmail('Quotation', quotation).catch(err =>
+      console.error('[createQuotation] Error sending email:', err.message)
+    );
+
     res.status(201).json(quotation);
   } catch (error) {
     res.status(400).json({ message: 'Error creating quotation', error: error.message });
@@ -162,6 +169,11 @@ export const convertToProforma = async (req, res) => {
     quotation.convertedToProforma = proformaNo;
     quotation.status = 'Accepted';
     await quotation.save();
+
+    // Send automated email to the customer
+    sendDocumentEmail('Proforma Invoice', proforma).catch(err =>
+      console.error('[convertToProforma] Error sending email:', err.message)
+    );
 
     res.status(201).json(proforma);
   } catch (error) {

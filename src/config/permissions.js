@@ -31,8 +31,7 @@ export const ALL_SIDEBAR_MODULE_KEYS = [
   "notifications",
   "company_settings",
   "users_roles",
-  "audit_logs",
-  "deployment"
+  "audit_logs"
 ];
 
 export const isAdminRole = (role) => {
