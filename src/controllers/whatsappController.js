@@ -366,7 +366,7 @@ export const getWhatsAppQR = async (req, res) => {
     try {
         const phone = req.query.phone || process.env.WHATSAPP_BUSINESS_PHONE_NUMBER || process.env.WHATSAPP_TEST_PHONE_NUMBER || '919850011223';
         const message = req.query.message || 'Hello Nexcore Alliance, I would like to inquire about your automation products and solutions.';
-        const qrData = generateWhatsAppQR(phone, message);
+        const qrData = await generateWhatsAppQR(phone, message);
 
         res.json({
             success: true,
@@ -387,7 +387,7 @@ export const getWhatsAppConfig = async (req, res) => {
         const webhookUrl = `${backendBase}/api/whatsapp/webhook`;
         const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || 'nexcore_whatsapp_verify_token_2026';
         const businessPhone = process.env.WHATSAPP_BUSINESS_PHONE_NUMBER || process.env.WHATSAPP_TEST_PHONE_NUMBER || '15559637917';
-        const qr = generateWhatsAppQR(businessPhone);
+        const qr = await generateWhatsAppQR(businessPhone);
 
         res.json({
             success: true,

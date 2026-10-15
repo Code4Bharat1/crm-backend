@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { nextDocNumber } from '../utils/nextDocNumber.js';
 
 const warrantyClaimSchema = new mongoose.Schema({
   claimId: { type: String, required: true },
@@ -55,9 +56,7 @@ const warrantySchema = new mongoose.Schema({
 // Auto-generate warrantyNo if not provided
 warrantySchema.pre('validate', async function () {
   if (!this.warrantyNo) {
-    const year = new Date().getFullYear();
-    const count = await mongoose.model('Warranty').countDocuments();
-    this.warrantyNo = `WAR-${year}-${String(count + 1).padStart(3, '0')}`;
+    this.warrantyNo = await nextDocNumber(mongoose.model('Warranty'), 'warrantyNo', `WAR-${new Date().getFullYear()}-`);
   }
 
   // Auto calculate status based on endDate

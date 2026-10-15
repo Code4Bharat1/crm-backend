@@ -159,6 +159,9 @@ Return ONLY valid JSON.
 
     } catch (error) {
         console.error("Error processing AI lead extraction:", error);
+        if ([429, 503].includes(error.status)) {
+            return res.status(503).json({ message: "The AI service is busy right now. Please try again in a minute.", error: error.message });
+        }
         res.status(500).json({ message: "Internal server error while extracting lead", error: error.message });
     }
 };
@@ -207,6 +210,9 @@ Return ONLY valid JSON.
 
     } catch (error) {
         console.error("Error processing AI lead extraction from text:", error);
+        if ([429, 503].includes(error.status)) {
+            return res.status(503).json({ message: "The AI service is busy right now. Please try again in a minute.", error: error.message });
+        }
         res.status(500).json({ message: "Internal server error while extracting lead", error: error.message });
     }
 };
@@ -415,8 +421,9 @@ export const markEmailAsRead = async (req, res) => {
 
         res.json({ message: "Email marked as read in Gmail" });
     } catch (error) {
+        // The CRM's read flag is already saved above; Gmail's own \Seen flag is best-effort.
         console.error("Error marking email as read in Gmail:", error.message || error);
-        res.status(500).json({ message: "Error marking email as read in Gmail", error: error.message });
+        res.json({ message: "Email marked as read (Gmail flag not updated)", error: error.message });
     } finally {
         if (connection) {
             try {

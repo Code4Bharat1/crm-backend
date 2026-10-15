@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { nextDocNumber } from '../utils/nextDocNumber.js';
 
 const partUsedSchema = new mongoose.Schema({
   partName: { type: String, required: true },
@@ -67,9 +68,7 @@ const serviceRequestSchema = new mongoose.Schema({
 // Auto-generate requestId if not provided
 serviceRequestSchema.pre('validate', async function () {
   if (!this.requestId) {
-    const year = new Date().getFullYear();
-    const count = await mongoose.model('ServiceRequest').countDocuments();
-    this.requestId = `SR-${year}-${String(count + 1).padStart(3, '0')}`;
+    this.requestId = await nextDocNumber(mongoose.model('ServiceRequest'), 'requestId', `SR-${new Date().getFullYear()}-`);
   }
 });
 

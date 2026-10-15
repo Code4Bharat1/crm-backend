@@ -1,4 +1,5 @@
 import axios from 'axios';
+import qrcode from 'qrcode';
 import { isWebClientConnected, sendWebMessage } from '../services/whatsappWebService.js';
 
 /**
@@ -124,11 +125,13 @@ export const sendWhatsAppMessage = async (messageData) => {
  * @param {string} phone - Target business WhatsApp phone number
  * @param {string} prefilledMessage - Message automatically placed in chat
  */
-export const generateWhatsAppQR = (phone, prefilledMessage = 'Hello Nexcore, I would like to inquire about your automation products and solutions.') => {
+export const generateWhatsAppQR = async (phone, prefilledMessage = 'Hello Nexcore, I would like to inquire about your automation products and solutions.') => {
     const rawNumber = String(phone || process.env.WHATSAPP_BUSINESS_PHONE_NUMBER || process.env.WHATSAPP_TEST_PHONE_NUMBER || '919850011223').replace(/[^\d]/g, '');
     const encodedText = encodeURIComponent(prefilledMessage);
     const chatUrl = `https://wa.me/${rawNumber}?text=${encodedText}`;
-    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(chatUrl)}&margin=10`;
+    // Rendered here as a data URL (same as the linked-device QR) instead of linking a third-party
+    // QR service the phone may not be able to reach -- that left the Customer QR tab blank.
+    const qrCodeUrl = await qrcode.toDataURL(chatUrl, { width: 300, margin: 2 });
 
     return {
         phoneNumber: rawNumber,

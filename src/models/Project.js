@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { nextDocNumber } from '../utils/nextDocNumber.js';
 
 const costItemSchema = new mongoose.Schema({
   head: { type: String, required: true },
@@ -80,9 +81,7 @@ const projectSchema = new mongoose.Schema({
 // Auto-generate projectId if not provided
 projectSchema.pre('validate', async function () {
   if (!this.projectId) {
-    const year = new Date().getFullYear();
-    const count = await mongoose.model('Project').countDocuments();
-    this.projectId = `PRJ-${year}-${String(count + 1).padStart(3, '0')}`;
+    this.projectId = await nextDocNumber(mongoose.model('Project'), 'projectId', `PRJ-${new Date().getFullYear()}-`);
   }
 });
 

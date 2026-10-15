@@ -62,6 +62,8 @@ export const sendPasswordResetEmail = async ({ user, resetToken, req }) => {
 
     const portalUrl = resolvePortalUrl(req);
     const resetUrl = `${portalUrl}/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
+    // Same link for the mobile app (scheme from CRM_APP/app.json); opens its reset screen prefilled.
+    const appResetUrl = `crmapp://reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
     const recipientName = name || email.split('@')[0] || 'Valued User';
     const senderEmail = process.env.EMAIL_ID;
 
@@ -127,6 +129,9 @@ export const sendPasswordResetEmail = async ({ user, resetToken, req }) => {
         <p style="margin: 0 0 16px 0; font-size: 12px; line-height: 1.4; word-break: break-all;">
           <a href="${resetUrl}" style="color: #2563eb; text-decoration: underline;">${resetUrl}</a>
         </p>
+        <p style="margin: 0 0 16px 0; font-size: 12px; line-height: 1.5; color: #64748b;">
+          Using the CONTECH mobile app? <a href="${appResetUrl}" style="color: #2563eb; text-decoration: underline;">Open in the CRM app</a>, or paste the link above into the app's reset screen.
+        </p>
       </td>
     </tr>
     
@@ -142,7 +147,9 @@ export const sendPasswordResetEmail = async ({ user, resetToken, req }) => {
 </html>
 `;
 
-    const textContent = `Hello ${recipientName},\n\nWe received a request to reset your CONTECH CRM password.\n\nPlease visit the link below to choose a new password (valid for 60 minutes):\n${resetUrl}\n\nIf you did not request this, please ignore this email.\n\nBest regards,\nCONTECH Security Team`;
+    const textContent = `Hello ${recipientName},\n\nWe received a request to reset your CONTECH CRM password.\n\nPlease visit the link below to choose a new password (valid for 60 minutes):\n${resetUrl}\n\nUsing the mobile app? Open: ${appResetUrl}
+
+If you did not request this, please ignore this email.\n\nBest regards,\nCONTECH Security Team`;
 
     const mailOptions = {
       from: `"CONTECH Security" <${senderEmail}>`,

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { nextDocNumber } from '../utils/nextDocNumber.js';
 
 const supplierSchema = new mongoose.Schema({
   supplierCode: { type: String, unique: true }, // e.g., SUP-001
@@ -30,8 +31,7 @@ const supplierSchema = new mongoose.Schema({
 
 supplierSchema.pre('validate', async function () {
   if (!this.supplierCode) {
-    const count = await mongoose.model('Supplier').countDocuments();
-    this.supplierCode = `SUP-${String(count + 1).padStart(3, '0')}`;
+    this.supplierCode = await nextDocNumber(mongoose.model('Supplier'), 'supplierCode', `SUP-`);
   }
 });
 

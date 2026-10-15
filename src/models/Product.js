@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { nextDocNumber } from '../utils/nextDocNumber.js';
 
 const productSchema = new mongoose.Schema({
   itemCode: { type: String, unique: true, sparse: true, index: true }, // SKU / Item Code
@@ -30,8 +31,7 @@ const productSchema = new mongoose.Schema({
 // Auto-generate itemCode if not provided (e.g. PRD-001)
 productSchema.pre('validate', async function () {
   if (!this.itemCode) {
-    const count = await mongoose.model('Product').countDocuments();
-    this.itemCode = `PRD-${String(count + 1).padStart(3, '0')}`;
+    this.itemCode = await nextDocNumber(mongoose.model('Product'), 'itemCode', `PRD-`);
   }
 });
 

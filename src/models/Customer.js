@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { nextDocNumber } from '../utils/nextDocNumber.js';
 
 const customerSchema = new mongoose.Schema({
   id: { type: String, unique: true }, // e.g., CUST-001
@@ -36,8 +37,7 @@ customerSchema.index({ createdAt: -1 });
 
 customerSchema.pre('validate', async function () {
   if (!this.id) {
-    const count = await mongoose.model('Customer').countDocuments();
-    this.id = `CUST-${String(count + 1).padStart(3, '0')}`;
+    this.id = await nextDocNumber(mongoose.model('Customer'), 'id', `CUST-`);
   }
 });
 

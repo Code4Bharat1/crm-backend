@@ -42,6 +42,7 @@ import notificationRoutes from './routes/notificationRoutes.js';
 import bankRoutes from './routes/bankRoutes.js';
 import followUpRoutes from './routes/followUpRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
+import { moduleAccess } from './middleware/moduleAccess.js';
 
 dotenv.config();
 connectDB();
@@ -84,6 +85,8 @@ app.use(cors({
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // ─── Existing Routes ────────────────────────────────────────────────────────
+// Login + module permissions for every /api route (see middleware/moduleAccess.js).
+app.use('/api', moduleAccess);
 app.use('/api/auth', authRoutes);
 app.use('/api/audit-logs', auditLogRoutes);
 app.use('/api/customers', customerRoutes);

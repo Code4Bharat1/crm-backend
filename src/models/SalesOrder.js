@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { nextDocNumber } from '../utils/nextDocNumber.js';
 
 const itemSchema = new mongoose.Schema({
   productCode:  { type: String },
@@ -58,9 +59,7 @@ const salesOrderSchema = new mongoose.Schema({
 
 salesOrderSchema.pre('validate', async function () {
   if (!this.soNo) {
-    const year = new Date().getFullYear();
-    const count = await mongoose.model('SalesOrder').countDocuments();
-    this.soNo = `SO-${year}-${String(count + 1).padStart(3, '0')}`;
+    this.soNo = await nextDocNumber(mongoose.model('SalesOrder'), 'soNo', `SO-${new Date().getFullYear()}-`);
   }
 });
 

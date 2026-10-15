@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { nextDocNumber } from '../utils/nextDocNumber.js';
 
 const itemSchema = new mongoose.Schema({
   productCode:  { type: String },
@@ -55,9 +56,7 @@ const quotationSchema = new mongoose.Schema({
 
 quotationSchema.pre('validate', async function () {
   if (!this.quotationNo) {
-    const year = new Date().getFullYear();
-    const count = await mongoose.model('Quotation').countDocuments();
-    this.quotationNo = `QT-${year}-${String(count + 1).padStart(3, '0')}`;
+    this.quotationNo = await nextDocNumber(mongoose.model('Quotation'), 'quotationNo', `QT-${new Date().getFullYear()}-`);
   }
 });
 

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { nextDocNumber } from '../utils/nextDocNumber.js';
 
 const serialNumberSchema = new mongoose.Schema({
   serialNo: { type: String, required: true, unique: true, index: true },
@@ -33,9 +34,7 @@ const serialNumberSchema = new mongoose.Schema({
 // Auto-generate serialNo if not provided
 serialNumberSchema.pre('validate', async function () {
   if (!this.serialNo) {
-    const year = new Date().getFullYear();
-    const count = await mongoose.model('SerialNumber').countDocuments();
-    this.serialNo = `SN-${year}-${String(count + 1).padStart(4, '0')}`;
+    this.serialNo = await nextDocNumber(mongoose.model('SerialNumber'), 'serialNo', `SN-${new Date().getFullYear()}-`, 4);
   }
 });
 
