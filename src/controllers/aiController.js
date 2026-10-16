@@ -266,7 +266,9 @@ export const fetchEmail = async (req, res) => {
             }
 
             if (existingLead) {
-                if (existingLead.stage === 'New') {
+                // Old sent mail must not undo a stage the user set by hand (e.g. moved back to "New").
+                const isFreshReply = new Date(email.date || Date.now()) > new Date(existingLead.lastRepliedAt || existingLead.createdAt);
+                if (existingLead.stage === 'New' && isFreshReply) {
                     const prevStage = existingLead.stage;
                     existingLead.stage = 'Contacted';
                     existingLead.customerEmail = existingLead.customerEmail || recipient;

@@ -5,25 +5,25 @@ import Lead from '../models/Lead.js';
 import { deductInventoryStock } from './salesOrderController.js';
 import { sendDocumentEmail } from '../utils/sendDocumentEmail.js';
 
-// Sync lead stage to "Quotation Sent" when quotation is created/sent
-const syncLeadToQuotationSent = async (customerName, quotationNo) => {
-  if (!customerName) return;
+// Stages a quotation may advance from; later stages (Negotiation, Won, Lost...) are never overwritten.
+const PRE_QUOTATION_STAGES = ['New', 'Contacted', 'Potential', 'Hot'];
+
+// Move the ONE lead this quotation belongs to into "Quotation Sent".
+// Prefers the lead id referenced in notes/subject ("Ref Lead: LD-1234"), else the latest lead with that customer name.
+const syncLeadToQuotationSent = async (quotation) => {
+  const customerName = quotation.customer?.name;
   try {
-    const raw = String(customerName).trim();
-    const clean = raw.replace(/^["']|["']$/g, '').trim();
-    const query = {
-      $or: [
-        { customerName: raw },
-        { customerName: clean },
-        { customerName: `"${clean}"` },
-        { customerName: new RegExp(`^"?${clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"?$`, 'i') }
-      ]
-    };
-    await Lead.updateMany(query, {
-      $set: {
-        stage: 'Quotation Sent'
-      }
-    });
+    const leadId = `${quotation.notes || ''} ${quotation.subject || ''}`.match(/LD-\d+/)?.[0];
+    let lead = leadId ? await Lead.findOne({ id: leadId }) : null;
+    if (!lead && customerName) {
+      const clean = String(customerName).trim().replace(/^["']|["']$/g, '').trim();
+      lead = await Lead.findOne({
+        customerName: new RegExp(`^"?${clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"?$`, 'i')
+      }).sort({ updatedAt: -1 });
+    }
+    if (!lead || !PRE_QUOTATION_STAGES.includes(lead.stage)) return;
+    lead.stage = 'Quotation Sent';
+    await lead.save();
   } catch (err) {
     console.error('Failed to sync lead stage to Quotation Sent:', err);
   }
@@ -82,7 +82,7 @@ export const createQuotation = async (req, res) => {
     const quotationNo = body.quotationNo || await generateQuotationNo();
     const quotation = new Quotation({ ...body, quotationNo });
     await quotation.save();
-    await syncLeadToQuotationSent(quotation.customer?.name, quotation.quotationNo);
+    await syncLeadToQuotationSent(quotation);
 
     // Send automated email to the customer
     sendDocumentEmail('Quotation', quotation).catch(err =>
@@ -112,7 +112,7 @@ export const updateQuotation = async (req, res) => {
     }
     Object.assign(doc, body);
     await doc.save();
-    await syncLeadToQuotationSent(doc.customer?.name, doc.quotationNo);
+    await syncLeadToQuotationSent(doc);
     res.json(doc);
   } catch (error) {
     res.status(400).json({ message: 'Error updating quotation', error: error.message });
