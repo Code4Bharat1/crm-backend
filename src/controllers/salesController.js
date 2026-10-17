@@ -1,10 +1,11 @@
-import Lead from '../models/Lead.js';
+import Lead, { LEAD_STAGES } from '../models/Lead.js';
 import SalesDocument from '../models/SalesDocument.js';
 import Employee from '../models/Employee.js';
 import SalesOrder from '../models/SalesOrder.js';
 import Quotation from '../models/Quotation.js';
 import Customer from '../models/Customer.js';
 import { convertLeadToCustomer, WON_STAGE } from '../utils/leadConversion.js';
+import { nextDocNumber } from '../utils/nextDocNumber.js';
 
 // --- LEADS ---
 
@@ -48,7 +49,7 @@ export const createLead = async (req, res) => {
       });
     }
 
-    const newLead = new Lead(req.body);
+    const newLead = new Lead({ ...req.body, id: req.body.id || await nextDocNumber(Lead, 'id', 'LD-', 4) });
     const savedLead = await newLead.save();
 
     // A lead can be filed straight at "Won" (e.g. repeat order logged after the fact).
@@ -177,15 +178,40 @@ export const updateLeadStage = async (req, res) => {
       return res.status(400).json({ message: 'Stage is required' });
     }
 
+    const targetIdx = LEAD_STAGES.indexOf(stage);
+    if (targetIdx === -1) {
+      return res.status(400).json({ message: `Invalid stage "${stage}"` });
+    }
+
     const lead = await Lead.findOne({ id });
     if (!lead) {
       return res.status(404).json({ message: 'Lead not found' });
     }
 
     const prevStage = lead.stage;
+    if (targetIdx < LEAD_STAGES.indexOf(prevStage)) {
+      return res.status(400).json({ message: `Lead stage can only move forward (currently "${prevStage}").` });
+    }
+
+    const stamp = `\n\n[Stage Updated] Stage changed from ${prevStage} to ${stage} on ${new Date().toLocaleString()}.`;
     lead.stage = stage;
-    lead.notes = (lead.notes || '') + `\n\n[Stage Updated] Stage changed from ${prevStage} to ${stage} on ${new Date().toLocaleString()}.`;
+    lead.notes = (lead.notes || '') + stamp;
     await lead.save();
+
+    // Every email from the same customer created its own lead — keep them on the same stage.
+    // Siblings already further along are left alone so nothing moves backward.
+    const email = (lead.customerEmail || '').trim();
+    if (email) {
+      const escaped = email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      await Lead.updateMany(
+        {
+          id: { $ne: lead.id },
+          customerEmail: { $regex: new RegExp(`^${escaped}$`, 'i') },
+          stage: { $in: LEAD_STAGES.slice(0, targetIdx) },
+        },
+        [{ $set: { stage, notes: { $concat: [{ $ifNull: ['$notes', ''] }, stamp] } } }]
+      );
+    }
 
     // Moving into Won auto-creates (or links) the matching customer record — once per lead.
     if (stage === WON_STAGE && prevStage !== WON_STAGE) {

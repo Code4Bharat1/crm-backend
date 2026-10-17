@@ -1,11 +1,14 @@
 import mongoose from 'mongoose';
 
+// Pipeline order: manual stage changes may only move forward along this list.
+export const LEAD_STAGES = ["New", "Contacted", "Potential", "Hot", "Quotation Sent", "Negotiation", "Won", "Lost", "On Hold"];
+
 const leadSchema = new mongoose.Schema({
   id: { type: String, required: true, unique: true }, // e.g., LD-1001
   customerName: { type: String, required: true },
   date: { type: Date, default: Date.now },
   source: { type: String, enum: ["Reference", "IndiaMART", "Cold Call", "Website", "Exhibition", "WhatsApp", "Existing Customer", "Email Inquiry"] },
-  stage: { type: String, enum: ["New", "Contacted", "Potential", "Hot", "Quotation Sent", "Negotiation", "Won", "Lost", "On Hold"], default: "New" },
+  stage: { type: String, enum: LEAD_STAGES, default: "New" },
   priority: { type: String, enum: ["Low", "Medium", "High", "Critical"], default: "Medium" },
   value: { type: Number, default: 0 },
   salesperson: { type: String },

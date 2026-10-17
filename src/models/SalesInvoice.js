@@ -20,7 +20,7 @@ const itemSchema = new mongoose.Schema({
 const paymentSchema = new mongoose.Schema({
   amount:    { type: Number, required: true },
   date:      { type: Date, default: Date.now },
-  mode:      { type: String, enum: ['NEFT', 'RTGS', 'UPI', 'Cheque', 'Cash', 'DD', 'Credit Note'], default: 'NEFT' },
+  mode:      { type: String, enum: ['NEFT', 'RTGS', 'UPI', 'Cheque', 'Cash', 'DD', 'Credit Note', 'Advance Transfer'], default: 'NEFT' },
   reference: { type: String },  // UTR number, cheque number
   notes:     { type: String },
   recordedBy:{ type: String },

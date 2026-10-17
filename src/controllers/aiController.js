@@ -3,7 +3,7 @@ import { simpleParser } from 'mailparser';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import nodemailer from 'nodemailer';
 import Email from '../models/Email.js';
-import Lead from '../models/Lead.js';
+import Lead, { LEAD_STAGES } from '../models/Lead.js';
 import { generateWithRetry } from '../utils/geminiRetry.js';
 
 const fetchRecentEmailsFromBox = async (boxName = 'INBOX', limit = 10) => {
@@ -543,6 +543,9 @@ export const sendDirectEmail = async (req, res) => {
                     newStage = 'Contacted';
                 }
             }
+
+            // Never move a lead backward (e.g. a follow-up on a Hot lead keeps it Hot).
+            if (LEAD_STAGES.indexOf(newStage) < LEAD_STAGES.indexOf(prevStage)) newStage = prevStage;
 
             updatedLead.stage = newStage;
             updatedLead.customerEmail = updatedLead.customerEmail || to.trim();
